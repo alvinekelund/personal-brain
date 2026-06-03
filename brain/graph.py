@@ -1,7 +1,7 @@
 """Graph traversal and context synthesis."""
 import os
 from collections import deque
-import anthropic
+import google.generativeai as genai
 from brain import db
 
 
@@ -58,13 +58,10 @@ Write a structured context document with sections:
 
 Be concise and synthesise — don't just list facts. Write as if briefing someone who needs to understand this person's knowledge state quickly."""
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return msg.content[0].text.strip()
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
 
 def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:

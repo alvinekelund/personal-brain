@@ -39,7 +39,7 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 ```bash
 pip install -r requirements.txt
 pip install -e .
-export ANTHROPIC_API_KEY=sk-...
+export GEMINI_API_KEY=...
 ```
 
 ---

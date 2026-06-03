@@ -234,7 +234,8 @@ def _run_decay(conn):
 def _synthesize(conn):
     """Find isolated nodes and dense clusters, generate insight nodes."""
     import os
-    import anthropic as _anthropic
+    import json
+    import google.generativeai as genai
 
     nodes = db.all_nodes(conn, min_weight=0.3)
     if not nodes:
@@ -251,7 +252,8 @@ def _synthesize(conn):
     isolated = [n for n in nodes if n["id"] not in connected]
     click.echo(f"Found {len(isolated)} isolated node(s), trying to connect...")
 
-    client = _anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     # try to connect isolated nodes to existing graph
     if isolated:
@@ -263,16 +265,11 @@ def _synthesize(conn):
                 f'Which existing node does "{iso["name"]}" most relate to, and how? '
                 f'Reply as JSON: {{"target": "node name", "relation": "relation_label"}} or null if none.'
             )
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = msg.content[0].text.strip()
+            response = model.generate_content(prompt)
+            raw = response.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1].lstrip("json").strip()
             try:
-                import json
                 suggestion = json.loads(raw)
                 if suggestion and suggestion.get("target"):
                     target_node = db.get_node_by_name(conn, suggestion["target"])

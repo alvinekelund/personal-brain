@@ -1,6 +1,6 @@
 import json
 import os
-import anthropic
+import google.generativeai as genai
 
 SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
@@ -23,21 +23,19 @@ Rules:
 
 
 def extract(text: str, source: str = "") -> dict:
-    """Call Claude Haiku to extract nodes and edges from raw text."""
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    """Call Gemini Flash to extract nodes and edges from raw text."""
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    model = genai.GenerativeModel(
+        model_name="gemini-2.0-flash",
+        system_instruction=SYSTEM,
+    )
 
     prompt = f"Extract knowledge from this text:\n\n{text[:4000]}"
     if source:
         prompt += f"\n\n(Source: {source})"
 
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2048,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    raw = msg.content[0].text.strip()
+    response = model.generate_content(prompt)
+    raw = response.text.strip()
 
     # strip markdown code fences if present
     if raw.startswith("```"):
