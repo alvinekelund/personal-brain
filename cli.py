@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 import sys
 import click
-from brain import db, decay, extract, graph, visualize
+from brain import db, decay, extract, graph, visualize, config
 
 
 @click.group()
 def cli():
     pass
+
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+def setup():
+    """Set your name so the brain knows who it belongs to."""
+    current = config.get_user()
+    if current:
+        name = click.prompt(f"Your name (currently '{current}')", default=current)
+    else:
+        name = click.prompt("Your name")
+    config.set_user(name.strip())
+    conn = db.connect()
+    db.ensure_identity_anchor(conn, name.strip())
+    click.echo(f"Brain configured for {name}.")
 
 
 # ── add ───────────────────────────────────────────────────────────────────────
@@ -41,25 +57,33 @@ def add(text, file_path, url, source):
     conn = db.connect()
     _run_decay(conn)
 
-    existing_names = [n["name"] for n in db.all_nodes(conn)]
+    user = config.get_user()
+    if user:
+        db.ensure_identity_anchor(conn, user)
+
+    existing_nodes = db.all_nodes(conn)
+    existing_names = [n["name"] for n in existing_nodes]
 
     click.echo("Extracting knowledge...")
     try:
-        extracted = extract.extract(raw, source=source, existing_names=existing_names)
+        extracted = extract.extract(raw, source=source, existing_names=existing_names, user=user)
     except Exception as e:
         click.echo(f"Extraction failed: {e}", err=True)
         sys.exit(1)
 
-    node_ids, edge_ids = extract.merge_into_db(conn, extracted, source, raw)
-    click.echo(
-        f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s)."
-    )
+    new_nodes = extracted.get("nodes", [])
+    entity_links = extract.link_entities(new_nodes, existing_nodes)
+    if entity_links:
+        click.echo(f"  Linked: {entity_links}")
 
-    n_nodes = len(extracted.get("nodes", []))
-    for n in extracted.get("nodes", [])[:5]:
-        click.echo(f"  [{n.get('type', '?')}] {n['name']}")
-    if n_nodes > 5:
-        click.echo(f"  ... and {n_nodes - 5} more")
+    node_ids, edge_ids = extract.merge_into_db(conn, extracted, source, raw, entity_links=entity_links)
+    click.echo(f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s).")
+
+    for n in new_nodes[:5]:
+        display = entity_links.get(n["name"], n["name"])
+        click.echo(f"  [{n.get('type', '?')}] {display}")
+    if len(new_nodes) > 5:
+        click.echo(f"  ... and {len(new_nodes) - 5} more")
 
 
 # ── show ──────────────────────────────────────────────────────────────────────
@@ -138,7 +162,8 @@ def status():
     click.echo(f"By type:  {s['by_type']}")
     if any(result.values()):
         click.echo(
-            f"Decay:    updated={result['updated']} archived={result['archived']} deleted={result['deleted']}"
+            f"Decay:    nodes updated={result['updated']} archived={result['archived']} "
+            f"deleted={result['deleted']} | edges pruned={result['edges_pruned']}"
         )
 
 

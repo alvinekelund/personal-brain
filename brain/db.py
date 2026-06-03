@@ -33,12 +33,14 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 
 CREATE TABLE IF NOT EXISTS edges (
-    id         TEXT PRIMARY KEY,
-    source_id  TEXT NOT NULL,
-    target_id  TEXT NOT NULL,
-    relation   TEXT NOT NULL DEFAULT 'relates_to',
-    weight     REAL NOT NULL DEFAULT 1.0,
-    created_at REAL NOT NULL,
+    id                  TEXT PRIMARY KEY,
+    source_id           TEXT NOT NULL,
+    target_id           TEXT NOT NULL,
+    relation            TEXT NOT NULL DEFAULT 'relates_to',
+    weight              REAL NOT NULL DEFAULT 1.0,
+    created_at          REAL NOT NULL,
+    last_reinforced     REAL NOT NULL DEFAULT 0,
+    reinforcement_count INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE,
     FOREIGN KEY (target_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
@@ -64,8 +66,22 @@ def connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
+
+
+def _migrate(conn):
+    """Add columns introduced after initial schema without breaking existing DBs."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(edges)")}
+    for col, defn in [
+        ("last_reinforced", "REAL NOT NULL DEFAULT 0"),
+        ("reinforcement_count", "INTEGER NOT NULL DEFAULT 1"),
+    ]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE edges ADD COLUMN {col} {defn}")
+    # backfill last_reinforced = created_at where still 0
+    conn.execute("UPDATE edges SET last_reinforced = created_at WHERE last_reinforced = 0")
 
 
 def new_id():
@@ -127,6 +143,14 @@ def delete_node(conn, node_id):
     conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
 
 
+def ensure_identity_anchor(conn, name: str):
+    """Create the user's identity node if it doesn't exist. Never decays."""
+    existing = get_node_by_name(conn, name)
+    if not existing:
+        add_node(conn, name=name, type_="person", content=f"The owner of this brain.", confidence=1.0)
+        conn.commit()
+
+
 def search_nodes(conn, query, min_weight=0.0):
     q = query.lower()
     return conn.execute(
@@ -141,17 +165,28 @@ def search_nodes(conn, query, min_weight=0.0):
 # ── Edges ──────────────────────────────────────────────────────────────────
 
 def add_edge(conn, source_id, target_id, relation="relates_to", weight=1.0):
-    # don't duplicate
     existing = conn.execute(
         "SELECT id FROM edges WHERE source_id=? AND target_id=? AND relation=?",
         (source_id, target_id, relation),
     ).fetchone()
     if existing:
+        # Hebbian reinforcement: strengthen the connection and reset decay clock
+        conn.execute(
+            """UPDATE edges
+               SET weight = min(1.0, weight + 0.15),
+                   last_reinforced = ?,
+                   reinforcement_count = reinforcement_count + 1
+               WHERE id = ?""",
+            (now(), existing["id"]),
+        )
         return existing["id"]
     edge_id = new_id()
+    t = now()
     conn.execute(
-        "INSERT INTO edges (id, source_id, target_id, relation, weight, created_at) VALUES (?,?,?,?,?,?)",
-        (edge_id, source_id, target_id, relation, weight, now()),
+        """INSERT INTO edges
+           (id, source_id, target_id, relation, weight, created_at, last_reinforced, reinforcement_count)
+           VALUES (?,?,?,?,?,?,?,1)""",
+        (edge_id, source_id, target_id, relation, weight, t, t),
     )
     return edge_id
 
