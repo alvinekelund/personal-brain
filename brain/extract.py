@@ -1,6 +1,7 @@
 import json
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
@@ -24,17 +25,17 @@ Rules:
 
 def extract(text: str, source: str = "") -> dict:
     """Call Gemini Flash to extract nodes and edges from raw text."""
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
-        system_instruction=SYSTEM,
-    )
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
     prompt = f"Extract knowledge from this text:\n\n{text[:4000]}"
     if source:
         prompt += f"\n\n(Source: {source})"
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(system_instruction=SYSTEM),
+    )
     raw = response.text.strip()
 
     # strip markdown code fences if present

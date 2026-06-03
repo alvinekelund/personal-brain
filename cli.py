@@ -235,7 +235,7 @@ def _synthesize(conn):
     """Find isolated nodes and dense clusters, generate insight nodes."""
     import os
     import json
-    import google.generativeai as genai
+    from google import genai
 
     nodes = db.all_nodes(conn, min_weight=0.3)
     if not nodes:
@@ -252,8 +252,7 @@ def _synthesize(conn):
     isolated = [n for n in nodes if n["id"] not in connected]
     click.echo(f"Found {len(isolated)} isolated node(s), trying to connect...")
 
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
     # try to connect isolated nodes to existing graph
     if isolated:
@@ -265,7 +264,7 @@ def _synthesize(conn):
                 f'Which existing node does "{iso["name"]}" most relate to, and how? '
                 f'Reply as JSON: {{"target": "node name", "relation": "relation_label"}} or null if none.'
             )
-            response = model.generate_content(prompt)
+            response = gemini.models.generate_content(model="gemini-2.5-flash", contents=prompt)
             raw = response.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1].lstrip("json").strip()
