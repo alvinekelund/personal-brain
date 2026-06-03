@@ -41,9 +41,11 @@ def add(text, file_path, url, source):
     conn = db.connect()
     _run_decay(conn)
 
+    existing_names = [n["name"] for n in db.all_nodes(conn)]
+
     click.echo("Extracting knowledge...")
     try:
-        extracted = extract.extract(raw, source=source)
+        extracted = extract.extract(raw, source=source, existing_names=existing_names)
     except Exception as e:
         click.echo(f"Extraction failed: {e}", err=True)
         sys.exit(1)

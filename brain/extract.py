@@ -23,13 +23,19 @@ Rules:
 - prefer fewer high-confidence nodes over many uncertain ones"""
 
 
-def extract(text: str, source: str = "") -> dict:
+def extract(text: str, source: str = "", existing_names: list[str] | None = None) -> dict:
     """Call Gemini Flash to extract nodes and edges from raw text."""
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
     prompt = f"Extract knowledge from this text:\n\n{text[:4000]}"
     if source:
         prompt += f"\n\n(Source: {source})"
+    if existing_names:
+        prompt += (
+            f"\n\nExisting nodes already in the graph — reuse these exact names "
+            f"if the text refers to the same entity:\n"
+            + ", ".join(existing_names[:60])
+        )
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
