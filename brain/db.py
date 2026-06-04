@@ -5,13 +5,16 @@ from pathlib import Path
 from brain import DB_PATH
 
 HALF_LIVES = {
-    "event":   7.0,
-    "fact":    21.0,
-    "concept": 60.0,
-    "insight": 90.0,
-    "skill":   180.0,
-    "project": 365.0,
-    "person":  float("inf"),
+    "task":         5.0,      # actionable items — fade fast once irrelevant
+    "event":        7.0,
+    "fact":         21.0,
+    "artifact":     30.0,     # documents, slides, files — temporary references
+    "concept":      60.0,
+    "insight":      90.0,
+    "skill":        180.0,
+    "project":      365.0,
+    "person":       float("inf"),
+    "organization": float("inf"),  # institutions don't expire
 }
 
 SCHEMA = """

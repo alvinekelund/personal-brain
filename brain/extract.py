@@ -7,12 +7,29 @@ SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
 {
   "nodes": [
-    {"name": "...", "type": "concept|skill|project|person|fact|insight|event", "content": "...", "confidence": 0.0-1.0}
+    {"name": "...", "type": "...", "content": "...", "confidence": 0.0-1.0}
   ],
   "edges": [
-    {"source": "...", "target": "...", "relation": "relates_to|builds_on|requires|contradicts|part_of|studied_by|created_by|used_in"}
+    {"source": "...", "target": "...", "relation": "..."}
   ]
 }
+
+Node types — pick the most specific one that fits:
+  person       — a human being
+  organization — a company, university, institution, team
+  concept      — an abstract idea, theory, or domain of knowledge
+  skill        — a concrete capability someone has or is learning
+  project      — an ongoing body of work with a goal
+  task         — a specific actionable to-do item (time-bound, completable)
+  artifact     — a document, slide deck, codebase, file, or physical object
+  fact         — a specific true claim or data point
+  insight      — a synthesised understanding or non-obvious conclusion
+  event        — a time-bound occurrence (meeting, deadline, semester)
+
+Edge relations — pick the most specific one that fits:
+  relates_to | builds_on | requires | contradicts | part_of |
+  studied_by | created_by | used_in | assigned_to | attended_by |
+  works_at | member_of | located_at
 
 Rules:
 - names are short labels (2-5 words max)
