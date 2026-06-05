@@ -1,7 +1,6 @@
 """Graph traversal and context synthesis."""
-import os
 from collections import deque
-from brain import db
+from brain import db, llm
 
 
 def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2) -> dict:
@@ -28,7 +27,7 @@ def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2) -> 
 
 
 def synthesize_context(nodes: dict, topic: str = "") -> str:
-    """Call Claude Sonnet to synthesise a context document from a node collection."""
+    """Call the LLM to synthesise a context document from a node collection."""
     if not nodes:
         return "No relevant knowledge found."
 
@@ -57,10 +56,7 @@ Write a structured context document with sections:
 
 Be concise and synthesise — don't just list facts. Write as if briefing someone who needs to understand this person's knowledge state quickly."""
 
-    from google import genai
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-    return response.text.strip()
+    return llm.generate(prompt).strip()
 
 
 def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:

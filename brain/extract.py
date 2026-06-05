@@ -1,5 +1,5 @@
 import json
-import os
+from brain import llm
 
 SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
@@ -38,11 +38,6 @@ Rules:
 - prefer fewer high-confidence nodes over many uncertain ones"""
 
 
-def _client():
-    from google import genai
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-
-
 def _parse_json(raw: str) -> dict:
     raw = raw.strip()
     if raw.startswith("```"):
@@ -55,9 +50,6 @@ def _parse_json(raw: str) -> dict:
 
 def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
     """Call Gemini Flash to extract nodes and edges from raw text."""
-    from google.genai import types
-    client = _client()
-
     prompt = f"Extract knowledge from this text:\n\n{text[:4000]}"
     if source:
         prompt += f"\n\n(Source: {source})"
@@ -74,12 +66,8 @@ def extract(text: str, source: str = "", existing_names: list[str] | None = None
             + ", ".join(existing_names[:60])
         )
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(system_instruction=SYSTEM),
-    )
-    return _parse_json(response.text)
+    response_text = llm.generate(prompt, system=SYSTEM, response_json=True)
+    return _parse_json(response_text)
 
 
 def link_entities(new_nodes: list, existing_nodes: list) -> dict:
@@ -102,8 +90,7 @@ def link_entities(new_nodes: list, existing_nodes: list) -> dict:
     )
 
     try:
-        response = _client().models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        return _parse_json(response.text)
+        return _parse_json(llm.generate(prompt, response_json=True))
     except Exception:
         return {}
 
