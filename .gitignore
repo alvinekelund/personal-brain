@@ -6,3 +6,5 @@ build/
 .env
 *.db
 *.sqlite
+.venv/
+_loop_test*.py

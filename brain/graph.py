@@ -1,7 +1,6 @@
 """Graph traversal and context synthesis."""
 import os
 from collections import deque
-from google import genai
 from brain import db
 
 
@@ -58,6 +57,7 @@ Write a structured context document with sections:
 
 Be concise and synthesise — don't just list facts. Write as if briefing someone who needs to understand this person's knowledge state quickly."""
 
+    from google import genai
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
     return response.text.strip()

@@ -1,7 +1,5 @@
 import json
 import os
-from google import genai
-from google.genai import types
 
 SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
@@ -41,6 +39,7 @@ Rules:
 
 
 def _client():
+    from google import genai
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
@@ -56,6 +55,7 @@ def _parse_json(raw: str) -> dict:
 
 def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
     """Call Gemini Flash to extract nodes and edges from raw text."""
+    from google.genai import types
     client = _client()
 
     prompt = f"Extract knowledge from this text:\n\n{text[:4000]}"

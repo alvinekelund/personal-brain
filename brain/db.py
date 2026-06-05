@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import uuid
 import time
@@ -154,15 +155,45 @@ def ensure_identity_anchor(conn, name: str):
         conn.commit()
 
 
+_STOPWORDS = {
+    "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "with",
+    "is", "are", "be", "about", "my", "i", "me", "this", "that", "it",
+}
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
 def search_nodes(conn, query, min_weight=0.0):
-    q = query.lower()
-    return conn.execute(
-        """SELECT * FROM nodes
-           WHERE (lower(name) LIKE ? OR lower(content) LIKE ?)
-             AND archived = 0 AND weight >= ?
-           ORDER BY weight DESC""",
-        (f"%{q}%", f"%{q}%", min_weight),
+    """Token-based ranked search.
+
+    A whole-phrase substring match ("machine learning" must appear verbatim) is
+    far too brittle for a knowledge graph — the brain stores "Data Science" and
+    "transformers", not the literal query phrase. Instead, split the query into
+    tokens and rank each node by how many distinct query tokens appear in its
+    name or content (whole-phrase matches get a bonus), then by weight.
+    """
+    q = query.lower().strip()
+    if not q:
+        return []
+    tokens = {t for t in _TOKEN_RE.findall(q) if len(t) > 1 and t not in _STOPWORDS}
+    if not tokens:
+        tokens = {q}
+
+    rows = conn.execute(
+        "SELECT * FROM nodes WHERE archived = 0 AND weight >= ?", (min_weight,)
     ).fetchall()
+
+    scored = []
+    for r in rows:
+        hay = f"{r['name']} {r['content'] or ''}".lower()
+        hits = sum(1 for t in tokens if t in hay)
+        if not hits:
+            continue
+        if q in hay:  # exact-phrase match is a strong signal
+            hits += len(tokens)
+        scored.append((hits, r["weight"], r))
+
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [r for _, _, r in scored]
 
 
 # ── Edges ──────────────────────────────────────────────────────────────────
