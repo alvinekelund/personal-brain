@@ -226,6 +226,39 @@ class SynthesizeTests(BrainTestCase):
         self.assertEqual(graph.connect_isolated_nodes(self.conn), [])
 
 
+class RelationVocabTests(BrainTestCase):
+    def test_exact_vocab_preserved(self):
+        for rel in db.RELATIONS:
+            self.assertEqual(db.normalize_relation(rel), rel)
+
+    def test_freeform_mapped_to_vocab(self):
+        cases = {
+            "relies on": "requires",
+            "is a key component of": "part_of",
+            "depends on": "requires",
+            "works for": "works_at",
+            "was created by": "created_by",
+            "USED-BY": "used_in",
+            "located in": "located_at",
+        }
+        for raw, expected in cases.items():
+            self.assertEqual(db.normalize_relation(raw), expected, raw)
+
+    def test_unknown_defaults_to_relates_to(self):
+        self.assertEqual(db.normalize_relation("blah blah"), "relates_to")
+        self.assertEqual(db.normalize_relation(""), "relates_to")
+        self.assertEqual(db.normalize_relation(None), "relates_to")
+
+    def test_add_edge_normalizes_and_stores_vocab(self):
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        db.add_edge(self.conn, a, b, "is a key component of")
+        self.conn.commit()
+        rel = db.all_edges(self.conn)[0]["relation"]
+        self.assertEqual(rel, "part_of")
+        self.assertIn(rel, db.RELATIONS)
+
+
 class ParseJsonTests(unittest.TestCase):
     def test_plain(self):
         self.assertEqual(llm.parse_json('{"a": 1}'), {"a": 1})

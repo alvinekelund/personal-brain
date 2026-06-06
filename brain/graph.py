@@ -118,6 +118,7 @@ def connect_isolated_nodes(conn, max_connect: int = 5, min_weight: float = 0.3) 
             f'The node "{iso["name"]}" ({iso["content"]}) is isolated.\n'
             f'Existing nodes: {", ".join(candidates)}\n\n'
             f'Which existing node does "{iso["name"]}" most relate to, and how? '
+            f'Pick the relation from: {", ".join(db.RELATIONS)}.\n'
             f'Reply as JSON: {{"target": "node name", "relation": "relation_label"}} '
             f'or null if none.'
         )

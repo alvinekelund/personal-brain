@@ -18,6 +18,53 @@ HALF_LIVES = {
     "organization": float("inf"),  # institutions don't expire
 }
 
+# Controlled edge-relation vocabulary. Every edge is normalized to one of these
+# (see normalize_relation), so extraction and synthesis stay consistent and the
+# graph never accumulates free-form labels like "relies on" / "is a key part of".
+RELATIONS = (
+    "relates_to", "builds_on", "requires", "contradicts", "part_of",
+    "studied_by", "created_by", "used_in", "assigned_to", "attended_by",
+    "works_at", "member_of", "located_at",
+)
+
+
+def normalize_relation(relation: str) -> str:
+    """Map a free-form relation label onto the controlled vocabulary.
+
+    Exact match wins; otherwise a few keyword heuristics catch verbose LLM
+    phrasings ("is a key component of" -> part_of); unknowns fall back to
+    relates_to so an edge is never dropped for a bad label.
+    """
+    r = (relation or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if r in RELATIONS:
+        return r
+    if "part" in r or "component" in r or "belong" in r:
+        return "part_of"
+    if "requir" in r or "relies" in r or "rely" in r or "depend" in r or "need" in r:
+        return "requires"
+    if "build" in r or "extend" in r:
+        return "builds_on"
+    if "contradict" in r or "conflict" in r:
+        return "contradicts"
+    if "creat" in r or "made" in r or "author" in r or "wrote" in r:
+        return "created_by"
+    if "work" in r or "employ" in r:
+        return "works_at"
+    if "studi" in r or "study" in r or "learn" in r:
+        return "studied_by"
+    if "attend" in r:
+        return "attended_by"
+    if "member" in r:
+        return "member_of"
+    if "assign" in r or "request" in r:
+        return "assigned_to"
+    if "use" in r:
+        return "used_in"
+    if "locat" in r:
+        return "located_at"
+    return "relates_to"
+
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 
@@ -209,6 +256,7 @@ def search_nodes(conn, query, min_weight=0.0):
 # ── Edges ──────────────────────────────────────────────────────────────────
 
 def add_edge(conn, source_id, target_id, relation="relates_to", weight=1.0):
+    relation = normalize_relation(relation)  # keep the graph on the controlled vocab
     existing = conn.execute(
         "SELECT id FROM edges WHERE source_id=? AND target_id=? AND relation=?",
         (source_id, target_id, relation),
