@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import brain
+import brain.config as config
 import brain.db as db
 import brain.decay as decay
 import brain.graph as graph
@@ -310,6 +311,33 @@ class ParseJsonTests(unittest.TestCase):
 
     def test_null_passes_through(self):
         self.assertIsNone(llm.parse_json("null"))
+
+
+class ConfigTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig = config.CONFIG_PATH
+        config.CONFIG_PATH = Path(self._tmp) / "config.json"
+
+    def tearDown(self):
+        config.CONFIG_PATH = self._orig
+
+    def test_missing_returns_empty(self):
+        self.assertEqual(config.load(), {})
+        self.assertEqual(config.get_user(), "")
+
+    def test_corrupt_returns_empty_not_crash(self):
+        config.CONFIG_PATH.write_text("{ not valid json ,,,")
+        self.assertEqual(config.load(), {})
+        self.assertEqual(config.get_user(), "")  # must not raise
+
+    def test_non_dict_json_returns_empty(self):
+        config.CONFIG_PATH.write_text("[1, 2, 3]")
+        self.assertEqual(config.load(), {})
+
+    def test_roundtrip(self):
+        config.set_user("Alvin")
+        self.assertEqual(config.get_user(), "Alvin")
 
 
 class DotenvTests(unittest.TestCase):

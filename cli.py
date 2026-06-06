@@ -35,7 +35,11 @@ def setup():
 def add(text, file_path, url, source):
     """Ingest text, a file, or a URL into the brain."""
     if file_path:
-        raw = open(file_path).read()
+        try:
+            raw = open(file_path, encoding="utf-8", errors="replace").read()
+        except OSError as e:
+            click.echo(f"Could not read file: {e}", err=True)
+            sys.exit(1)
         source = source or file_path
     elif url:
         try:
@@ -52,6 +56,10 @@ def add(text, file_path, url, source):
         raw = text
     else:
         click.echo("Provide text, --file, or --url.", err=True)
+        sys.exit(1)
+
+    if not raw or not raw.strip():
+        click.echo("Nothing to ingest — the input is empty.", err=True)
         sys.exit(1)
 
     conn = db.connect()
