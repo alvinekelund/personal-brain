@@ -241,6 +241,38 @@ class ExtractMockTests(BrainTestCase):
         raw = '```json\n{"nodes":[],"edges":[]}\n```'
         self.assertEqual(extract._parse_json(raw), {"nodes": [], "edges": []})
 
+    def test_parse_json_salvages_from_prose(self):
+        raw = 'Sure! Here is the JSON:\n{"nodes": [], "edges": []}\nHope that helps.'
+        self.assertEqual(extract._parse_json(raw), {"nodes": [], "edges": []})
+
+
+class RobustMergeTests(BrainTestCase):
+    def test_skips_nameless_nodes(self):
+        extracted = {
+            "nodes": [
+                {"type": "concept", "content": "no name"},      # malformed
+                {"name": "  ", "type": "concept"},               # blank name
+                {"name": "Valid", "type": "concept", "content": "ok"},
+            ],
+            "edges": [],
+        }
+        nids, _ = extract.merge_into_db(self.conn, extracted, "src", "raw")
+        self.assertEqual(len(nids), 1)
+        self.assertEqual(db.all_nodes(self.conn)[0]["name"], "Valid")
+
+    def test_tolerates_malformed_edges(self):
+        extracted = {
+            "nodes": [{"name": "A", "type": "concept"}, {"name": "B", "type": "concept"}],
+            "edges": [
+                {"source": "A"},                                  # missing target
+                {"relation": "relates_to"},                       # missing both
+                {"source": "A", "target": "B", "relation": "relates_to"},
+            ],
+        }
+        nids, eids = extract.merge_into_db(self.conn, extracted, "src", "raw")
+        self.assertEqual(len(nids), 2)
+        self.assertEqual(len(eids), 1)  # only the well-formed edge
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

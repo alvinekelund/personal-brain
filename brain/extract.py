@@ -53,7 +53,15 @@ def _parse_json(raw: str) -> dict:
         if raw.startswith("json"):
             raw = raw[4:]
         raw = raw.strip()
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Salvage: pull the outermost {...} block out of any surrounding prose
+        # so one chatty/partial LLM response can't crash `brain add`.
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end > start:
+            return json.loads(raw[start:end + 1])
+        raise
 
 
 def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
@@ -113,12 +121,16 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str, entity_link
     edge_ids = []
 
     for n in extracted.get("nodes", []):
+        # defensive: a malformed node (no name) shouldn't abort the whole ingest
+        name = (n.get("name") or "").strip()
+        if not name:
+            continue
         # resolve through entity linker first, then fall back to name match
-        canonical = entity_links.get(n["name"], n["name"])
+        canonical = entity_links.get(name, name)
         existing = db.get_node_by_name(conn, canonical)
         if existing:
             db.touch_node(conn, existing["id"])
-            name_to_id[n["name"]] = existing["id"]
+            name_to_id[name] = existing["id"]
             name_to_id[canonical] = existing["id"]
             node_ids.append(existing["id"])
         else:
@@ -130,13 +142,13 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str, entity_link
                 source=source,
                 confidence=n.get("confidence", 0.8),
             )
-            name_to_id[n["name"]] = nid
+            name_to_id[name] = nid
             name_to_id[canonical] = nid
             node_ids.append(nid)
 
     for e in extracted.get("edges", []):
-        src_id = name_to_id.get(e["source"])
-        tgt_id = name_to_id.get(e["target"])
+        src_id = name_to_id.get((e.get("source") or "").strip())
+        tgt_id = name_to_id.get((e.get("target") or "").strip())
         if src_id and tgt_id and src_id != tgt_id:
             eid = db.add_edge(conn, src_id, tgt_id, e.get("relation", "relates_to"))
             edge_ids.append(eid)
