@@ -29,10 +29,11 @@ def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2) -> 
 def collect_context_nodes(conn, topic: str = "", depth: int = 3, min_weight: float = 0.2):
     """Gather the node set for a context document.
 
-    Returns (nodes_dict, used_fallback). When a topic is given but keyword search
-    finds no seeds (e.g. the brain stores "Data Science" but you asked for
-    "machine learning"), fall back to the whole high-weight brain instead of
-    returning nothing — so `context "<topic>"` always produces something useful.
+    Returns (nodes_dict, used_fallback). When a topic is given, seed from the
+    (stem-aware) keyword search and BFS-expand for connected context. If keyword
+    search finds nothing, fall back to the whole high-weight brain — the
+    synthesis step is topic-aware and focuses the document regardless, so this
+    is reliable without a brittle LLM seed-picker.
     """
     used_fallback = False
     if topic:

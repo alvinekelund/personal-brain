@@ -162,6 +162,15 @@ _STOPWORDS = {
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
+def _stem_eq(a: str, b: str) -> bool:
+    """Loose token match tolerant of simple plurals/suffixes:
+    'transformer' ~ 'transformers', 'architecture' ~ 'architectures'."""
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and long.startswith(short) and len(long) - len(short) <= 3
+
+
 def search_nodes(conn, query, min_weight=0.0):
     """Token-based ranked search.
 
@@ -185,7 +194,8 @@ def search_nodes(conn, query, min_weight=0.0):
     scored = []
     for r in rows:
         hay = f"{r['name']} {r['content'] or ''}".lower()
-        hits = sum(1 for t in tokens if t in hay)
+        hay_tokens = set(_TOKEN_RE.findall(hay))
+        hits = sum(1 for t in tokens if any(_stem_eq(t, h) for h in hay_tokens))
         if not hits:
             continue
         if q in hay:  # exact-phrase match is a strong signal
