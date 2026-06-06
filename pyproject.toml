@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-brain"
+version = "0.1.0"
+description = "A local-first personal knowledge graph with automatic extraction, Ebbinghaus forgetting, and synthesis."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Alvin Ekelund" }]
+keywords = ["knowledge-graph", "personal-knowledge-management", "llm", "gemini", "local-first"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Topic :: Utilities",
+]
+dependencies = [
+    # LLM calls go through brain/llm.py over stdlib urllib — no SDK dependency.
+    "click>=8.1.0",
+    "pyvis>=0.3.2",
+    "networkx>=3.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/alvinekelund/personal-brain"
+Repository = "https://github.com/alvinekelund/personal-brain"
+
+[project.scripts]
+brain = "cli:cli"
+
+[tool.setuptools]
+packages = ["brain"]
+py-modules = ["cli"]

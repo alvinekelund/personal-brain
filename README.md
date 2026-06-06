@@ -39,8 +39,7 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 ## Install
 
 ```bash
-pip install -r requirements.txt
-pip install -e .
+pip install -e .                    # installs dependencies from pyproject.toml
 export GEMINI_API_KEY=...           # or put it in ~/.personal-brain/.env
 ```
 
