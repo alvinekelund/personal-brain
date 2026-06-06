@@ -294,6 +294,25 @@ def all_edges(conn):
     return conn.execute("SELECT * FROM edges").fetchall()
 
 
+def merge_nodes(conn, keep_id, drop_id) -> bool:
+    """Merge drop_id into keep_id: re-point drop's edges onto keep, then delete
+    drop (its leftover edges cascade away). Self-loops are skipped and add_edge
+    dedups/reinforces, so merging never creates loops or duplicate edges.
+    Returns False if either node is missing or the ids are the same.
+    """
+    if keep_id == drop_id or not get_node(conn, keep_id) or not get_node(conn, drop_id):
+        return False
+    for edge in edges_for_node(conn, drop_id):
+        src = keep_id if edge["source_id"] == drop_id else edge["source_id"]
+        tgt = keep_id if edge["target_id"] == drop_id else edge["target_id"]
+        if src != tgt:
+            add_edge(conn, src, tgt, edge["relation"], edge["weight"])
+    delete_node(conn, drop_id)
+    touch_node(conn, keep_id)
+    conn.commit()
+    return True
+
+
 # ── Ingestion log ──────────────────────────────────────────────────────────
 
 def log_ingestion(conn, raw_text, source, node_ids, edge_ids):

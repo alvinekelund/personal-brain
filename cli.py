@@ -232,16 +232,7 @@ def merge(id1, id2):
     if not n1 or not n2:
         click.echo("One or both nodes not found.", err=True)
         sys.exit(1)
-
-    # re-point all edges from n2 to n1
-    for edge in db.edges_for_node(conn, id2):
-        src = id1 if edge["source_id"] == id2 else edge["source_id"]
-        tgt = id1 if edge["target_id"] == id2 else edge["target_id"]
-        if src != tgt:
-            db.add_edge(conn, src, tgt, edge["relation"], edge["weight"])
-    db.delete_node(conn, id2)
-    db.touch_node(conn, id1)
-    conn.commit()
+    db.merge_nodes(conn, id1, id2)
     click.echo(f"Merged {n2['name']} → {n1['name']}")
 
 

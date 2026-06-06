@@ -177,6 +177,50 @@ class MergeTests(BrainTestCase):
         self.assertNotIn("attention", names)
 
 
+class MergeNodesTests(BrainTestCase):
+    def test_repoints_edges_and_deletes_drop(self):
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        c = db.add_node(self.conn, "C", type_="concept")
+        d = db.add_node(self.conn, "D", type_="concept")
+        db.add_edge(self.conn, a, c, "relates_to")
+        db.add_edge(self.conn, b, d, "relates_to")
+        self.conn.commit()
+        self.assertTrue(db.merge_nodes(self.conn, a, b))
+        self.assertIsNone(db.get_node(self.conn, b))                 # drop gone
+        neighbours = {e["source_id"] for e in db.edges_for_node(self.conn, a)} | \
+                     {e["target_id"] for e in db.edges_for_node(self.conn, a)}
+        self.assertIn(c, neighbours)                                 # original kept
+        self.assertIn(d, neighbours)                                 # re-pointed from b
+
+    def test_skips_self_loop(self):
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        db.add_edge(self.conn, a, b, "relates_to")
+        self.conn.commit()
+        db.merge_nodes(self.conn, a, b)
+        for e in db.all_edges(self.conn):
+            self.assertNotEqual(e["source_id"], e["target_id"])     # no self-loop created
+
+    def test_dedups_duplicate_edge(self):
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        x = db.add_node(self.conn, "X", type_="concept")
+        db.add_edge(self.conn, a, x, "relates_to")
+        db.add_edge(self.conn, b, x, "relates_to")
+        self.conn.commit()
+        db.merge_nodes(self.conn, a, b)
+        ax = [e for e in db.all_edges(self.conn)
+              if {e["source_id"], e["target_id"]} == {a, x}]
+        self.assertEqual(len(ax), 1)                                 # reinforced, not duplicated
+
+    def test_missing_node_returns_false(self):
+        a = db.add_node(self.conn, "A", type_="concept")
+        self.conn.commit()
+        self.assertFalse(db.merge_nodes(self.conn, a, "nonexistent"))
+        self.assertFalse(db.merge_nodes(self.conn, a, a))            # same id is a no-op
+
+
 class GraphTests(BrainTestCase):
     def setUp(self):
         super().setUp()
