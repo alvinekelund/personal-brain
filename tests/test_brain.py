@@ -171,6 +171,34 @@ class GraphTests(BrainTestCase):
         visited = graph.bfs(self.conn, [self.a], depth=0)
         self.assertEqual(set(visited), {self.a})
 
+    def test_bfs_does_not_expand_through_hub(self):
+        # topic -- hub(high degree) -- many unrelated leaves
+        topic = db.add_node(self.conn, "layer norm", type_="concept")
+        hub = db.add_node(self.conn, "Alvin", type_="person")
+        db.add_edge(self.conn, topic, hub, "relates_to")
+        leaves = []
+        for i in range(10):
+            leaf = db.add_node(self.conn, f"unrelated {i}", type_="concept")
+            db.add_edge(self.conn, hub, leaf, "relates_to")
+            leaves.append(leaf)
+        self.conn.commit()
+        visited = graph.bfs(self.conn, [topic], depth=3, hub_degree=8)
+        self.assertIn(hub, visited)              # hub itself is included
+        for leaf in leaves:
+            self.assertNotIn(leaf, visited)      # but its other neighbours are not
+
+    def test_bfs_seed_hub_still_expands(self):
+        hub = db.add_node(self.conn, "Hub", type_="person")
+        leaves = []
+        for i in range(10):
+            leaf = db.add_node(self.conn, f"leaf {i}", type_="concept")
+            db.add_edge(self.conn, hub, leaf, "relates_to")
+            leaves.append(leaf)
+        self.conn.commit()
+        visited = graph.bfs(self.conn, [hub], depth=1, hub_degree=8)
+        for leaf in leaves:                      # seed expands even though it's a hub
+            self.assertIn(leaf, visited)
+
     def test_context_keyword_path(self):
         nodes, fb = graph.collect_context_nodes(self.conn, topic="transformers", depth=2)
         self.assertFalse(fb)
@@ -180,6 +208,33 @@ class GraphTests(BrainTestCase):
         nodes, fb = graph.collect_context_nodes(self.conn, topic="quantum chromodynamics")
         self.assertTrue(fb)
         self.assertEqual(set(nodes), {self.a, self.b, self.c})
+
+    def test_hub_cap_floor_and_scaling(self):
+        # sparse graph -> floor
+        self.assertEqual(graph.hub_cap(self.conn, floor=5), 5)
+        # dense clique raises the cap above the floor
+        clique = [db.add_node(self.conn, f"c{i}", type_="concept") for i in range(6)]
+        for i in range(6):
+            for j in range(i + 1, 6):
+                db.add_edge(self.conn, clique[i], clique[j], "relates_to")
+        self.conn.commit()
+        self.assertGreater(graph.hub_cap(self.conn, floor=5), 5)
+
+    def test_context_excludes_unrelated_through_hub(self):
+        seed = db.add_node(self.conn, "rust lang", type_="concept", content="systems lang")
+        hub = db.add_node(self.conn, "Owner", type_="person")
+        db.add_edge(self.conn, seed, hub, "relates_to")
+        noise = []
+        for i in range(10):
+            n = db.add_node(self.conn, f"noise {i}", type_="concept")
+            db.add_edge(self.conn, hub, n, "relates_to")
+            noise.append(n)
+        self.conn.commit()
+        nodes, fb = graph.collect_context_nodes(self.conn, topic="rust")
+        self.assertFalse(fb)
+        self.assertIn(seed, nodes)
+        self.assertIn(hub, nodes)              # hub kept
+        self.assertTrue(all(n not in nodes for n in noise))  # its other leaves pruned
 
     def test_context_empty_brain(self):
         for n in db.all_nodes(self.conn):

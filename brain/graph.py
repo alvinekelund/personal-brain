@@ -3,8 +3,21 @@ from collections import deque
 from brain import db, llm
 
 
-def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2) -> dict:
-    """BFS from start_ids, returning {node_id: node_row} for all reachable nodes."""
+def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2,
+        hub_degree: int = 8) -> dict:
+    """BFS from start_ids, returning {node_id: node_row} for reachable nodes.
+
+    A node whose degree exceeds hub_degree is included when reached but is NOT
+    expanded through (unless it's a seed). Otherwise a single high-degree hub —
+    the identity node connects to almost everything — would pull the entire graph
+    into any topic query. Pass hub_degree<=0 to disable and do a plain BFS.
+    """
+    adjacency: dict = {}
+    for e in db.all_edges(conn):
+        adjacency.setdefault(e["source_id"], set()).add(e["target_id"])
+        adjacency.setdefault(e["target_id"], set()).add(e["source_id"])
+
+    starts = set(start_ids)
     visited = {}
     queue = deque((nid, 0) for nid in start_ids)
     seen = set(start_ids)
@@ -16,14 +29,33 @@ def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2) -> 
             continue
         visited[nid] = node
 
-        if d < depth:
-            for edge in db.edges_for_node(conn, nid):
-                nbr = edge["target_id"] if edge["source_id"] == nid else edge["source_id"]
-                if nbr not in seen:
-                    seen.add(nbr)
-                    queue.append((nbr, d + 1))
+        if d >= depth:
+            continue
+        # don't traverse THROUGH an incidental hub (seeds always expand)
+        if hub_degree > 0 and nid not in starts and len(adjacency.get(nid, ())) > hub_degree:
+            continue
+        for nbr in adjacency.get(nid, ()):
+            if nbr not in seen:
+                seen.add(nbr)
+                queue.append((nbr, d + 1))
 
     return visited
+
+
+def hub_cap(conn, floor: int = 5, factor: float = 2.0) -> int:
+    """A scale-relative degree above which a node is treated as a traversal hub.
+
+    Absolute thresholds don't transfer (degree 8 is a hub in a 15-node graph,
+    ordinary in a 500-node one), so key it off the mean degree with a floor.
+    """
+    degrees: dict = {}
+    for e in db.all_edges(conn):
+        degrees[e["source_id"]] = degrees.get(e["source_id"], 0) + 1
+        degrees[e["target_id"]] = degrees.get(e["target_id"], 0) + 1
+    if not degrees:
+        return floor
+    mean = sum(degrees.values()) / len(degrees)
+    return max(floor, int(round(mean * factor)))
 
 
 def collect_context_nodes(conn, topic: str = "", depth: int = 3, min_weight: float = 0.2):
@@ -47,7 +79,9 @@ def collect_context_nodes(conn, topic: str = "", depth: int = 3, min_weight: flo
 
     if not start_ids:
         return {}, used_fallback
-    return bfs(conn, start_ids, depth=depth, min_weight=min_weight), used_fallback
+    # only guard hubs for topic queries; a no-topic dump wants the whole brain
+    cap = hub_cap(conn) if topic and not used_fallback else 0
+    return bfs(conn, start_ids, depth=depth, min_weight=min_weight, hub_degree=cap), used_fallback
 
 
 def synthesize_context(nodes: dict, topic: str = "") -> str:
