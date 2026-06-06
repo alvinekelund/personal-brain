@@ -131,17 +131,18 @@ def context(topic, depth, min_weight):
     conn = db.connect()
     _run_decay(conn)
 
-    if topic:
-        seed_nodes = db.search_nodes(conn, topic, min_weight=min_weight)
-        start_ids = [n["id"] for n in seed_nodes]
-    else:
-        start_ids = [n["id"] for n in db.all_nodes(conn, min_weight=min_weight)]
-
-    if not start_ids:
-        click.echo("No relevant nodes found.", err=True)
+    all_nodes, used_fallback = graph.collect_context_nodes(
+        conn, topic=topic, depth=depth, min_weight=min_weight
+    )
+    if not all_nodes:
+        click.echo("No nodes found — the brain is empty. Run `brain add` first.", err=True)
         sys.exit(1)
+    if used_fallback:
+        click.echo(
+            f"Nothing matched '{topic}'; synthesising from the whole brain instead.",
+            err=True,
+        )
 
-    all_nodes = graph.bfs(conn, start_ids, depth=depth, min_weight=min_weight)
     click.echo(
         f"Synthesising context from {len(all_nodes)} node(s)...", err=True
     )

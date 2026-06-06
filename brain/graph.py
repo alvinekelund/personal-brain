@@ -26,6 +26,29 @@ def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2) -> 
     return visited
 
 
+def collect_context_nodes(conn, topic: str = "", depth: int = 3, min_weight: float = 0.2):
+    """Gather the node set for a context document.
+
+    Returns (nodes_dict, used_fallback). When a topic is given but keyword search
+    finds no seeds (e.g. the brain stores "Data Science" but you asked for
+    "machine learning"), fall back to the whole high-weight brain instead of
+    returning nothing — so `context "<topic>"` always produces something useful.
+    """
+    used_fallback = False
+    if topic:
+        seeds = db.search_nodes(conn, topic, min_weight=min_weight)
+        start_ids = [n["id"] for n in seeds]
+        if not start_ids:
+            used_fallback = True
+            start_ids = [n["id"] for n in db.all_nodes(conn, min_weight=min_weight)]
+    else:
+        start_ids = [n["id"] for n in db.all_nodes(conn, min_weight=min_weight)]
+
+    if not start_ids:
+        return {}, used_fallback
+    return bfs(conn, start_ids, depth=depth, min_weight=min_weight), used_fallback
+
+
 def synthesize_context(nodes: dict, topic: str = "") -> str:
     """Call the LLM to synthesise a context document from a node collection."""
     if not nodes:
