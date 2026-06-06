@@ -176,6 +176,13 @@ def status():
             f"deleted={result['deleted']} | edges pruned={result['edges_pruned']}"
         )
 
+    risky = decay.at_risk_nodes(conn)
+    if risky:
+        click.echo("Fading soon:")
+        for r in risky:
+            left = "soon" if r["days_left"] < 1 else f"~{r['days_left']:.0f}d"
+            click.echo(f"  [{r['type']:8s}] {r['name'][:34]:34s} w={r['weight']:.2f} ({left} to archive)")
+
 
 # ── decay ─────────────────────────────────────────────────────────────────────
 

@@ -3,6 +3,43 @@ import time
 
 EDGE_BASE_HALF_LIFE = 90.0   # days for a once-seen edge
 EDGE_MIN_WEIGHT = 0.05       # below this, delete the edge
+ARCHIVE_THRESHOLD = 0.10     # weight below this → archived
+
+
+def days_until_archive(weight: float, half_life_days: float,
+                       threshold: float = ARCHIVE_THRESHOLD) -> float:
+    """Days until an untouched node decays from `weight` to the archive threshold.
+
+    Solves w * 0.5**(d/H) = threshold for d. inf for never-decaying types.
+    """
+    if math.isinf(half_life_days):
+        return float("inf")
+    if weight <= threshold:
+        return 0.0
+    return half_life_days * math.log2(weight / threshold)
+
+
+def at_risk_nodes(conn, limit: int = 5, threshold: float = ARCHIVE_THRESHOLD) -> list:
+    """Active, decaying nodes closest to being archived (lowest weight first).
+
+    Returns dicts with name/type/weight and an estimated days_left until archive,
+    so `brain status` can show what's about to be forgotten. Never-decaying types
+    (person/organization) are excluded — they're not at risk.
+    """
+    rows = conn.execute(
+        "SELECT * FROM nodes WHERE archived=0 AND weight >= ? AND half_life_days < 1e12 "
+        "ORDER BY weight ASC LIMIT ?",
+        (threshold, limit),
+    ).fetchall()
+    return [
+        {
+            "name": r["name"],
+            "type": r["type"],
+            "weight": r["weight"],
+            "days_left": days_until_archive(r["weight"], r["half_life_days"], threshold),
+        }
+        for r in rows
+    ]
 
 
 def current_weight(weight: float, last_accessed: float, half_life_days: float) -> float:

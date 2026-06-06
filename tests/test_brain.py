@@ -85,6 +85,29 @@ class DecayTests(BrainTestCase):
         decay.run_decay(self.conn)
         self.assertIsNone(db.get_node(self.conn, nid))
 
+    def test_days_until_archive_math(self):
+        # 0.2 * 0.5**(7/7) = 0.1 -> exactly one half-life to the threshold
+        self.assertAlmostEqual(decay.days_until_archive(0.2, 7.0), 7.0, places=4)
+
+    def test_days_until_archive_at_or_below_threshold(self):
+        self.assertEqual(decay.days_until_archive(0.10, 60.0), 0.0)
+        self.assertEqual(decay.days_until_archive(0.05, 60.0), 0.0)
+
+    def test_days_until_archive_immortal_is_inf(self):
+        self.assertEqual(decay.days_until_archive(1.0, float("inf")), float("inf"))
+
+    def test_at_risk_lowest_first_excludes_immortal(self):
+        a = db.add_node(self.conn, "low", type_="concept")
+        b = db.add_node(self.conn, "mid", type_="concept")
+        db.add_node(self.conn, "high", type_="concept")
+        p = db.add_node(self.conn, "Person", type_="person")  # never decays
+        self.conn.execute("UPDATE nodes SET weight=0.15 WHERE id=?", (a,))
+        self.conn.execute("UPDATE nodes SET weight=0.50 WHERE id=?", (b,))
+        self.conn.execute("UPDATE nodes SET weight=0.12 WHERE id=?", (p,))  # low but immortal
+        self.conn.commit()
+        names = [r["name"] for r in decay.at_risk_nodes(self.conn, limit=2)]
+        self.assertEqual(names, ["low", "mid"])  # lowest decaying first; person excluded
+
 
 class SearchTests(BrainTestCase):
     def setUp(self):
