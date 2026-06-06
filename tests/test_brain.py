@@ -24,6 +24,7 @@ import brain.decay as decay
 import brain.graph as graph
 import brain.extract as extract
 import brain.llm as llm
+import brain.portability as portability
 
 DAY = 86400.0
 
@@ -375,6 +376,66 @@ class ChunkingTests(BrainTestCase):
         self.assertGreaterEqual(calls["n"], 2)  # every chunk hit the model
         names = [n["name"] for n in out["nodes"]]
         self.assertEqual(names.count("Shared"), 1)  # deduped across chunks
+
+
+class PortabilityTests(BrainTestCase):
+    def _seed(self):
+        a = db.add_node(self.conn, "transformers", type_="concept", content="nets")
+        b = db.add_node(self.conn, "Alvin", type_="person", content="owner")
+        c = db.add_node(self.conn, "old fact", type_="fact")
+        db.archive_node(self.conn, c)
+        db.add_edge(self.conn, a, b, "studied_by")
+        self.conn.commit()
+        return a, b, c
+
+    def _fresh_conn(self):
+        path = os.path.join(tempfile.mkdtemp(), "brain.db")
+        orig = db.DB_PATH
+        db.DB_PATH = path
+        conn = db.connect()
+        db.DB_PATH = orig
+        return conn
+
+    def test_export_includes_everything(self):
+        self._seed()
+        data = portability.export_brain(self.conn)
+        self.assertEqual(data["schema_version"], portability.SCHEMA_VERSION)
+        self.assertEqual(len(data["nodes"]), 3)   # archived node included
+        self.assertEqual(len(data["edges"]), 1)
+
+    def test_roundtrip_into_fresh_brain(self):
+        self._seed()
+        data = portability.export_brain(self.conn)
+        dest = self._fresh_conn()
+        n, e = portability.import_brain(dest, data)
+        self.assertEqual(n, 3)
+        self.assertEqual(e, 1)
+        self.assertEqual(len(db.all_nodes(dest, include_archived=True)), 3)
+        self.assertEqual(len(db.all_edges(dest)), 1)
+        # an exported node keeps its identity and fields
+        t = db.get_node_by_name(dest, "transformers")
+        self.assertEqual(t["type"], "concept")
+
+    def test_import_is_idempotent(self):
+        self._seed()
+        data = portability.export_brain(self.conn)
+        dest = self._fresh_conn()
+        portability.import_brain(dest, data)
+        n, e = portability.import_brain(dest, data)  # second time
+        self.assertEqual((n, e), (0, 0))
+
+    def test_import_dedups_by_name_and_remaps_edges(self):
+        self._seed()
+        data = portability.export_brain(self.conn)
+        dest = self._fresh_conn()
+        # dest already has "transformers" under a different id
+        db.add_node(dest, "transformers", type_="concept")
+        db.add_node(dest, "Alvin", type_="person")
+        dest.commit()
+        n, e = portability.import_brain(dest, data)
+        self.assertEqual(n, 1)  # only "old fact" is new; transformers/Alvin deduped
+        # edge studied_by remapped onto the existing nodes
+        self.assertEqual(len(db.all_edges(dest)), 1)
 
 
 class ParseJsonTests(unittest.TestCase):

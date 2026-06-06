@@ -90,6 +90,10 @@ brain prune                      # delete archived nodes
 brain reinforce <node-id>        # boost weight to 1.0
 brain forget <node-id>           # immediately archive
 brain merge <id1> <id2>          # merge id2 into id1
+
+# Backup / portability
+brain export backup.json         # dump the whole graph to JSON
+brain import backup.json         # merge a JSON export back in (skips duplicates)
 ```
 
 ---

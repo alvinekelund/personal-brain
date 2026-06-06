@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import click
-from brain import db, decay, extract, graph, visualize, config
+from brain import db, decay, extract, graph, visualize, config, portability
 
 
 @click.group()
@@ -267,6 +267,26 @@ def reinforce(node_id):
     db.touch_node(conn, node_id)
     conn.commit()
     click.echo(f"Reinforced {node_id}.")
+
+
+# ── export / import ─────────────────────────────────────────────────────────────
+
+@cli.command("export")
+@click.argument("path", required=False, default="brain-export.json")
+def export_cmd(path):
+    """Export the whole brain (nodes + edges) to a JSON file."""
+    conn = db.connect()
+    data = portability.export_to_file(conn, path)
+    click.echo(f"Exported {len(data['nodes'])} node(s), {len(data['edges'])} edge(s) to {path}")
+
+
+@cli.command("import")
+@click.argument("path", type=click.Path(exists=True))
+def import_cmd(path):
+    """Import nodes/edges from a JSON export (merges; skips duplicates)."""
+    conn = db.connect()
+    n, e = portability.import_from_file(conn, path)
+    click.echo(f"Imported {n} new node(s), {e} new edge(s).")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
