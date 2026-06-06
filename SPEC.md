@@ -24,7 +24,7 @@ What's missing: a tool that (a) ingests automatically with minimal friction, (b)
 
 A local-first personal knowledge graph with:
 
-1. **LLM-powered ingestion** — paste text, a URL, or a file. Claude extracts entities, facts, and relationships automatically.
+1. **LLM-powered ingestion** — paste text, a URL, or a file. Gemini extracts entities, facts, and relationships automatically.
 2. **Typed graph** — nodes have types (concept, skill, project, person, insight, fact) and edges have semantic labels (builds_on, requires, contradicts, studied_by, etc.)
 3. **Forgetting** — every node has a weight that decays via an Ebbinghaus-inspired curve. The half-life depends on node type. Accessing a node resets its weight.
 4. **Synthesis** — periodic job that finds clusters, surfaces novel connections, detects contradictions, and generates summary insights.
@@ -41,7 +41,7 @@ Everything runs locally. Data lives in `~/.personal-brain/`. No cloud, no accoun
 Ingestion
   └─ raw text / file / URL
        ↓
-  Extraction (Claude Haiku)
+  Extraction (Gemini Flash)
   └─ entities, types, relationships, confidence scores
        ↓
   Deduplication (name similarity + LLM merge check)
@@ -52,7 +52,7 @@ Ingestion
 
 Background
   └─ Decay job (runs on every CLI call)
-       └─ weight(t) = exp(−t / half_life)
+       └─ weight(t) = 0.5 ** (t / half_life)
        └─ weight < 0.1 → archived
        └─ archived > 7 days → pruned
 
@@ -122,8 +122,10 @@ Keeps raw text + list of nodes/edges created, so you can audit what came from wh
 ## Forgetting algorithm
 
 ```
-weight(t) = last_weight * exp(-days_since_access / half_life_days)
+weight(t) = last_weight * 0.5 ** (days_since_access / half_life_days)
 ```
+
+This is a true half-life: at `t == half_life_days` the weight is exactly halved.
 
 On access: `weight = 1.0`, `last_accessed = now()`  
 On `weight < 0.10`: `archived = 1`  
@@ -139,7 +141,7 @@ Not auto-running (too expensive). Triggered by `brain synthesize`.
 
 Steps:
 1. Load all nodes with weight > 0.3 into the graph
-2. Find isolated nodes (no edges) → prompt Claude: "how does X relate to existing knowledge?"
+2. Find isolated nodes (no edges) → prompt Gemini: "how does X relate to existing knowledge?"
 3. Find dense clusters (>5 nodes, high internal edge weight) → generate a summary insight node
 4. Find pairs with no path between them but related content → try to bridge them
 5. Surface the top 5 "new connections" found
@@ -190,7 +192,7 @@ brain reinforce <id>          # manually boost a node's weight
 
 ### Phase 1 — Core (built now)
 - SQLite schema + CRUD
-- Claude-powered extraction
+- Gemini-powered extraction
 - Ebbinghaus decay
 - CLI (add, show, query, context, status, decay, prune)
 - Pyvis visualization

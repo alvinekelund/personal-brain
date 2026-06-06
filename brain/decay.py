@@ -6,11 +6,16 @@ EDGE_MIN_WEIGHT = 0.05       # below this, delete the edge
 
 
 def current_weight(weight: float, last_accessed: float, half_life_days: float) -> float:
-    """Ebbinghaus forgetting curve: w(t) = w0 * exp(-t / half_life)."""
+    """Half-life decay: w(t) = w0 * 0.5**(t / half_life).
+
+    Uses base-1/2 so half_life_days is a *true* half-life — at t == half_life the
+    weight is exactly halved, matching the documented table. (The previous
+    exp(-t/half_life) form made half_life a mean-lifetime: 0.368 at t=H, not 0.5.)
+    """
     if math.isinf(half_life_days):
         return weight
     days_elapsed = (time.time() - last_accessed) / 86400.0
-    return weight * math.exp(-days_elapsed / half_life_days)
+    return weight * 0.5 ** (days_elapsed / half_life_days)
 
 
 def edge_half_life(reinforcement_count: int) -> float:
@@ -68,7 +73,7 @@ def run_decay(conn) -> dict:
     for e in edges:
         hl = edge_half_life(e["reinforcement_count"])
         days_elapsed = (now - e["last_reinforced"]) / 86400.0
-        new_w = e["weight"] * math.exp(-days_elapsed / hl)
+        new_w = e["weight"] * 0.5 ** (days_elapsed / hl)
 
         if new_w < EDGE_MIN_WEIGHT:
             conn.execute("DELETE FROM edges WHERE id = ?", (e["id"],))

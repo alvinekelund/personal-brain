@@ -1,6 +1,8 @@
 # Personal Brain
 
-A local-first personal knowledge graph. Paste text, a URL, or a file — Claude extracts entities and relationships automatically. Every node decays via an Ebbinghaus forgetting curve; accessing it resets the clock. The graph is explorable as an interactive Pyvis visualization, and any slice of it can be synthesized into a structured context document for pasting into an AI conversation.
+[![CI](https://github.com/alvinekelund/personal-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/alvinekelund/personal-brain/actions/workflows/ci.yml)
+
+A local-first personal knowledge graph. Paste text, a URL, or a file — Gemini extracts entities and relationships automatically. Every node decays via an Ebbinghaus forgetting curve; accessing it resets the clock. The graph is explorable as an interactive Pyvis visualization, and any slice of it can be synthesized into a structured context document for pasting into an AI conversation.
 
 No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
@@ -8,15 +10,15 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 ## What it does
 
-**Ingestion** — point it at anything: a paragraph, an article, a book chapter, a meeting transcript. Claude Haiku extracts typed nodes (concepts, skills, projects, people, facts, insights, events) and semantic edges (builds_on, requires, contradicts, part_of, etc.).
+**Ingestion** — point it at anything: a paragraph, an article, a book chapter, a meeting transcript. Gemini Flash extracts typed nodes (concepts, skills, projects, people, facts, insights, events) and semantic edges (builds_on, requires, contradicts, part_of, etc.).
 
 **Forgetting** — each node has a weight that decays according to its type. An event has a half-life of 7 days; a skill, 180 days; a person never expires. Weight drops below 0.1 → archived. Archived for 7 days → deleted. Accessing a node resets weight to 1.0. The decay runs automatically on every CLI call — no cron job needed.
 
 **Visualization** — `brain show` opens an interactive force-directed graph. Nodes are sized by weight, coloured by type. Hover for content, filter by weight threshold or type.
 
-**Context injection** — `brain context "ML internships"` does a BFS traversal from relevant nodes, then calls Claude Sonnet to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
+**Context injection** — `brain context "ML internships"` does a BFS traversal from relevant nodes, then calls Gemini to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
 
-**Synthesis** — `brain synthesize` finds isolated nodes and tries to connect them to the existing graph, surfacing relationships Claude notices across your knowledge.
+**Synthesis** — `brain synthesize` finds isolated nodes and tries to connect them to the existing graph, surfacing relationships Gemini notices across your knowledge.
 
 ---
 
@@ -39,8 +41,22 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 ```bash
 pip install -r requirements.txt
 pip install -e .
-export GEMINI_API_KEY=...
+export GEMINI_API_KEY=...           # or put it in ~/.personal-brain/.env
 ```
+
+---
+
+## Testing
+
+The core logic layer (decay, search, dedup/merge, graph traversal, context
+seeding, `.env` loading) is covered by a stdlib-only test suite — no API key or
+network required (the Gemini boundary is mocked):
+
+```bash
+python -m unittest discover -s tests
+```
+
+CI runs these on every push across Python 3.10–3.12.
 
 ---
 
@@ -83,7 +99,7 @@ brain merge <id1> <id2>          # merge id2 into id1
 ```
 Input (text / file / URL)
   ↓
-Claude Haiku extraction
+Gemini Flash extraction
   → typed nodes + semantic edges + confidence scores
   ↓
 Deduplication
@@ -98,7 +114,7 @@ Decay (on every CLI call)
   ↓
 Query / Output
   → brain query   → keyword search + weight sort
-  → brain context → BFS traversal → Claude Sonnet synthesis
+  → brain context → BFS traversal → Gemini synthesis
   → brain show    → Pyvis HTML graph
 ```
 
@@ -110,7 +126,7 @@ Query / Output
 |------|-------------|
 | `brain/db.py` | SQLite schema, all node/edge CRUD |
 | `brain/decay.py` | Ebbinghaus curve, decay runner |
-| `brain/extract.py` | Claude Haiku extraction, DB merge |
+| `brain/extract.py` | Gemini Flash extraction, DB merge |
 | `brain/graph.py` | BFS traversal, context synthesis |
 | `brain/visualize.py` | Pyvis interactive graph |
 | `cli.py` | Click CLI entry point |
