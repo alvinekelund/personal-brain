@@ -259,6 +259,45 @@ class RelationVocabTests(BrainTestCase):
         self.assertIn(rel, db.RELATIONS)
 
 
+class ChunkingTests(BrainTestCase):
+    def test_short_text_single_chunk(self):
+        self.assertEqual(extract._chunk_text("hello world"), ["hello world"])
+
+    def test_empty_text(self):
+        self.assertEqual(extract._chunk_text("   "), [])
+
+    def test_long_text_splits_within_size(self):
+        text = "\n\n".join("para %d %s" % (i, "x" * 500) for i in range(40))  # ~20k
+        chunks = extract._chunk_text(text, size=4000)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(c) <= 4000 for c in chunks))
+
+    def test_oversized_paragraph_hard_split(self):
+        chunks = extract._chunk_text("y" * 9000, size=4000)
+        self.assertEqual(len(chunks), 3)
+        self.assertTrue(all(len(c) <= 4000 for c in chunks))
+
+    def test_extract_processes_all_chunks_and_dedups(self):
+        calls = {"n": 0}
+
+        def fake(*a, **k):
+            calls["n"] += 1
+            return ('{"nodes":[{"name":"Shared","type":"concept"},'
+                    '{"name":"Uniq%d","type":"concept"}],"edges":[]}' % calls["n"])
+
+        orig = llm.generate
+        llm.generate = fake
+        try:
+            text = "\n\n".join("p%d %s" % (i, "z" * 1000) for i in range(12))  # multi-chunk
+            out = extract.extract(text)
+        finally:
+            llm.generate = orig
+
+        self.assertGreaterEqual(calls["n"], 2)  # every chunk hit the model
+        names = [n["name"] for n in out["nodes"]]
+        self.assertEqual(names.count("Shared"), 1)  # deduped across chunks
+
+
 class ParseJsonTests(unittest.TestCase):
     def test_plain(self):
         self.assertEqual(llm.parse_json('{"a": 1}'), {"a": 1})

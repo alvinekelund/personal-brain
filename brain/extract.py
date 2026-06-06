@@ -50,9 +50,40 @@ def _parse_json(raw: str) -> dict:
     return llm.parse_json(raw)
 
 
-def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
-    """Call Gemini Flash to extract nodes and edges from raw text."""
-    prompt = f"Extract knowledge from this text:\n\n{text[:4000]}"
+MAX_CHUNK = 4000
+
+
+def _chunk_text(text: str, size: int = MAX_CHUNK) -> list[str]:
+    """Split text into <=size pieces on paragraph boundaries (hard-splitting any
+    single oversized paragraph). Long input is chunked rather than silently
+    truncated, so ingesting an article or book chapter keeps all of it."""
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+    chunks: list[str] = []
+    cur = ""
+    for para in text.split("\n\n"):
+        if len(para) > size:
+            if cur.strip():
+                chunks.append(cur.strip())
+                cur = ""
+            for i in range(0, len(para), size):
+                chunks.append(para[i:i + size].strip())
+            continue
+        if cur and len(cur) + len(para) + 2 > size:
+            chunks.append(cur.strip())
+            cur = ""
+        cur += para + "\n\n"
+    if cur.strip():
+        chunks.append(cur.strip())
+    return [c for c in chunks if c]
+
+
+def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
+    """Call Gemini once on a single (already size-bounded) chunk of text."""
+    prompt = f"Extract knowledge from this text:\n\n{text[:MAX_CHUNK]}"
     if source:
         prompt += f"\n\n(Source: {source})"
     if user:
@@ -68,8 +99,30 @@ def extract(text: str, source: str = "", existing_names: list[str] | None = None
             + ", ".join(existing_names[:60])
         )
 
-    response_text = llm.generate(prompt, system=SYSTEM, response_json=True)
-    return _parse_json(response_text)
+    result = _parse_json(llm.generate(prompt, system=SYSTEM, response_json=True))
+    return result if isinstance(result, dict) else {"nodes": [], "edges": []}
+
+
+def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
+    """Extract nodes/edges from text. Long input is chunked and merged so nothing
+    past the model's input window is dropped."""
+    chunks = _chunk_text(text)
+    if not chunks:
+        return {"nodes": [], "edges": []}
+    if len(chunks) == 1:
+        return _extract_chunk(chunks[0], source, existing_names, user)
+
+    merged: dict = {"nodes": [], "edges": []}
+    seen: set[str] = set()
+    for chunk in chunks:
+        part = _extract_chunk(chunk, source, existing_names, user)
+        for n in part.get("nodes", []):
+            key = (n.get("name") or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                merged["nodes"].append(n)
+        merged["edges"].extend(part.get("edges", []))
+    return merged
 
 
 def link_entities(new_nodes: list, existing_nodes: list) -> dict:
