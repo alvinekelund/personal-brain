@@ -26,6 +26,27 @@ def have_key() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
 
 
+def parse_json(raw: str):
+    """Parse JSON from an LLM response, tolerating ``` fences and surrounding prose.
+
+    Falls back to the outermost {...} block so a chatty or partial response can't
+    crash callers. Single source of truth for parsing model output.
+    """
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end > start:
+            return json.loads(raw[start:end + 1])
+        raise
+
+
 def generate(
     prompt: str,
     system: str = "",

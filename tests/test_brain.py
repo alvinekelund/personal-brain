@@ -188,6 +188,58 @@ class GraphTests(BrainTestCase):
         self.assertEqual(nodes, {})
 
 
+class SynthesizeTests(BrainTestCase):
+    def setUp(self):
+        super().setUp()
+        self.hub = db.add_node(self.conn, "transformer architectures", type_="concept")
+        self.b = db.add_node(self.conn, "attention", type_="concept")
+        db.add_edge(self.conn, self.hub, self.b, "part_of")  # connected pair
+        self.iso = db.add_node(self.conn, "layer normalization", type_="concept",
+                               content="stabilises training")  # isolated
+        self.conn.commit()
+        self._orig_generate = llm.generate
+
+    def tearDown(self):
+        llm.generate = self._orig_generate
+        super().tearDown()
+
+    def test_connects_isolated_node(self):
+        llm.generate = lambda *a, **k: '{"target": "transformer architectures", "relation": "used_in"}'
+        made = graph.connect_isolated_nodes(self.conn)
+        self.assertEqual(len(made), 1)
+        self.assertEqual(made[0]["source"], "layer normalization")
+        self.assertEqual(made[0]["relation"], "used_in")
+        # edge actually persisted
+        self.assertTrue(db.edges_for_node(self.conn, self.iso))
+
+    def test_null_suggestion_makes_no_edge(self):
+        llm.generate = lambda *a, **k: "null"
+        self.assertEqual(graph.connect_isolated_nodes(self.conn), [])
+        self.assertEqual(db.edges_for_node(self.conn, self.iso), [])
+
+    def test_unknown_target_skipped(self):
+        llm.generate = lambda *a, **k: '{"target": "nonexistent node", "relation": "x"}'
+        self.assertEqual(graph.connect_isolated_nodes(self.conn), [])
+
+    def test_garbage_response_is_not_fatal(self):
+        llm.generate = lambda *a, **k: "the model rambled with no json at all"
+        self.assertEqual(graph.connect_isolated_nodes(self.conn), [])
+
+
+class ParseJsonTests(unittest.TestCase):
+    def test_plain(self):
+        self.assertEqual(llm.parse_json('{"a": 1}'), {"a": 1})
+
+    def test_fenced(self):
+        self.assertEqual(llm.parse_json('```json\n{"a": 1}\n```'), {"a": 1})
+
+    def test_salvage_from_prose(self):
+        self.assertEqual(llm.parse_json('here you go: {"a": 1} done'), {"a": 1})
+
+    def test_null_passes_through(self):
+        self.assertIsNone(llm.parse_json("null"))
+
+
 class DotenvTests(unittest.TestCase):
     def test_overrides_empty_env_var(self):
         tmp = tempfile.mkdtemp()

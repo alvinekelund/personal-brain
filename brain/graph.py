@@ -90,3 +90,49 @@ def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:
         db.touch_node(conn, r["id"])
     conn.commit()
     return results
+
+
+def connect_isolated_nodes(conn, max_connect: int = 5, min_weight: float = 0.3) -> list:
+    """Find nodes with no edges and ask the LLM to connect each to another node.
+
+    Adds the suggested edges and returns a list of
+    {"source", "relation", "target"} dicts for the connections actually made.
+    A bad/empty/unparseable suggestion for one node is skipped, not fatal.
+    """
+    nodes = db.all_nodes(conn, min_weight=min_weight)
+    if len(nodes) < 2:
+        return []
+
+    connected = set()
+    for e in db.all_edges(conn):
+        connected.add(e["source_id"])
+        connected.add(e["target_id"])
+    isolated = [n for n in nodes if n["id"] not in connected]
+
+    made = []
+    for iso in isolated[:max_connect]:
+        candidates = [n["name"] for n in nodes if n["id"] != iso["id"]][:30]
+        if not candidates:
+            continue
+        prompt = (
+            f'The node "{iso["name"]}" ({iso["content"]}) is isolated.\n'
+            f'Existing nodes: {", ".join(candidates)}\n\n'
+            f'Which existing node does "{iso["name"]}" most relate to, and how? '
+            f'Reply as JSON: {{"target": "node name", "relation": "relation_label"}} '
+            f'or null if none.'
+        )
+        try:
+            suggestion = llm.parse_json(llm.generate(prompt, response_json=True))
+        except Exception:
+            continue
+        if not isinstance(suggestion, dict) or not suggestion.get("target"):
+            continue
+        target = db.get_node_by_name(conn, suggestion["target"])
+        if not target or target["id"] == iso["id"]:
+            continue
+        relation = suggestion.get("relation") or "relates_to"
+        db.add_edge(conn, iso["id"], target["id"], relation)
+        made.append({"source": iso["name"], "relation": relation, "target": target["name"]})
+
+    conn.commit()
+    return made

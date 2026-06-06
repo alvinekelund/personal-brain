@@ -261,52 +261,23 @@ def _run_decay(conn):
 
 
 def _synthesize(conn):
-    """Find isolated nodes and dense clusters, generate insight nodes."""
-    import json
-    from brain import llm
-
+    """Find isolated nodes and connect them to the rest of the graph."""
     nodes = db.all_nodes(conn, min_weight=0.3)
-    if not nodes:
+    if len(nodes) < 2:
         click.echo("Not enough nodes to synthesize.")
         return
 
-    all_node_ids = {n["id"] for n in nodes}
-    all_edges = db.all_edges(conn)
     connected = set()
-    for e in all_edges:
+    for e in db.all_edges(conn):
         connected.add(e["source_id"])
         connected.add(e["target_id"])
+    isolated = sum(1 for n in nodes if n["id"] not in connected)
+    click.echo(f"Found {isolated} isolated node(s), trying to connect...")
 
-    isolated = [n for n in nodes if n["id"] not in connected]
-    click.echo(f"Found {len(isolated)} isolated node(s), trying to connect...")
-
-    # try to connect isolated nodes to existing graph
-    if isolated:
-        existing_names = [n["name"] for n in nodes if n["id"] in connected][:30]
-        for iso in isolated[:5]:  # limit API calls
-            prompt = (
-                f'The concept "{iso["name"]}" ({iso["content"]}) is isolated.\n'
-                f'Existing nodes: {", ".join(existing_names)}\n\n'
-                f'Which existing node does "{iso["name"]}" most relate to, and how? '
-                f'Reply as JSON: {{"target": "node name", "relation": "relation_label"}} or null if none.'
-            )
-            raw = llm.generate(prompt, response_json=True).strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1].lstrip("json").strip()
-            try:
-                suggestion = json.loads(raw)
-                if suggestion and suggestion.get("target"):
-                    target_node = db.get_node_by_name(conn, suggestion["target"])
-                    if target_node:
-                        db.add_edge(conn, iso["id"], target_node["id"], suggestion["relation"])
-                        click.echo(
-                            f"  Connected: {iso['name']} --{suggestion['relation']}--> {target_node['name']}"
-                        )
-            except Exception:
-                pass
-
-    conn.commit()
-    click.echo("Synthesis complete.")
+    made = graph.connect_isolated_nodes(conn)
+    for m in made:
+        click.echo(f"  Connected: {m['source']} --{m['relation']}--> {m['target']}")
+    click.echo(f"Synthesis complete. {len(made)} new connection(s).")
 
 
 if __name__ == "__main__":

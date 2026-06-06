@@ -47,21 +47,7 @@ Rules:
 
 
 def _parse_json(raw: str) -> dict:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Salvage: pull the outermost {...} block out of any surrounding prose
-        # so one chatty/partial LLM response can't crash `brain add`.
-        start, end = raw.find("{"), raw.rfind("}")
-        if start != -1 and end > start:
-            return json.loads(raw[start:end + 1])
-        raise
+    return llm.parse_json(raw)
 
 
 def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
