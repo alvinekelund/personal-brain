@@ -26,6 +26,13 @@ def have_key() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
 
 
+def _looks_like_key() -> bool:
+    """Google AI Studio keys are 'AIza' + 35 chars. Used only for a friendlier
+    error hint — never to block a call (formats can change)."""
+    key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+    return key.startswith("AIza") and len(key) >= 39
+
+
 def generate(
     prompt: str,
     system: str = "",
@@ -57,7 +64,14 @@ def generate(
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:400]
-        raise RuntimeError(f"Gemini API error {e.code}: {detail}") from None
+        hint = ""
+        if e.code == 400 and "API_KEY_INVALID" in detail and not _looks_like_key():
+            hint = (
+                "\nHint: the configured key doesn't look like a Google AI Studio key "
+                "(those start with 'AIza' and are ~39 chars). Get one at "
+                "https://aistudio.google.com/apikey and put it in ~/.personal-brain/.env"
+            )
+        raise RuntimeError(f"Gemini API error {e.code}: {detail}{hint}") from None
     except urllib.error.URLError as e:
         raise RuntimeError(f"Could not reach Gemini API: {e.reason}") from None
 
