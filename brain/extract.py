@@ -18,7 +18,9 @@ Node types — pick the most specific one that fits:
   concept      — an abstract idea, theory, or domain of knowledge
   skill        — a concrete capability someone has or is learning
   project      — an ongoing body of work with a goal
-  task         — a specific actionable to-do item (time-bound, completable)
+  task         — an OPEN, not-yet-done action the person still needs to do
+                 (e.g. "email Heli"). NEVER create a task for an action already
+                 completed in the text.
   artifact     — a document, slide deck, codebase, file, or physical object
   fact         — a specific true claim or data point
   insight      — a synthesised understanding or non-obvious conclusion
@@ -35,7 +37,13 @@ Rules:
 - edges use node names from the nodes list
 - confidence reflects how clearly the text supports this extraction
 - extract only what is genuinely stated or implied; don't hallucinate
-- prefer fewer high-confidence nodes over many uncertain ones"""
+- prefer fewer high-confidence nodes over many uncertain ones
+- prefer durable entities (concepts, skills, projects, people) over recording
+  one-off actions. A completed action is best captured by what it produced —
+  the concept learned, skill practised, or project advanced — not as its own node.
+- never emit two nodes for the same underlying thing. A problem and the act of
+  solving it are ONE node (keep the thing, e.g. "gradient explosion bug", and
+  express the outcome via an edge or its content) — not "X" plus "fixing X"."""
 
 
 def _parse_json(raw: str) -> dict:
