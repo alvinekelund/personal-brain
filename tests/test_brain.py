@@ -37,10 +37,15 @@ class BrainTestCase(unittest.TestCase):
         self._orig_db_path = db.DB_PATH
         db.DB_PATH = os.path.join(self._tmp, "brain.db")
         self.conn = db.connect()
+        # hermetic by default: no test should hit the network unless it opts in
+        # by mocking llm. (_load_dotenv may have loaded a real key into the env.)
+        self._orig_have_key = llm.have_key
+        llm.have_key = lambda: False
 
     def tearDown(self):
         self.conn.close()
         db.DB_PATH = self._orig_db_path
+        llm.have_key = self._orig_have_key
 
     def _age(self, node_id, days):
         """Backdate a node's last_accessed by `days` days."""
@@ -469,9 +474,33 @@ class GraphTests(BrainTestCase):
         self.assertIn(self.a, nodes)
 
     def test_context_fallback_to_whole_brain(self):
-        nodes, fb = graph.collect_context_nodes(self.conn, topic="quantum chromodynamics")
+        # no embeddings + key disabled → keyword miss falls back to whole brain
+        orig = llm.have_key
+        llm.have_key = lambda: False
+        try:
+            nodes, fb = graph.collect_context_nodes(self.conn, topic="quantum chromodynamics")
+        finally:
+            llm.have_key = orig
         self.assertTrue(fb)
         self.assertEqual(set(nodes), {self.a, self.b, self.c})
+
+    def test_context_semantic_seeding_on_keyword_miss(self):
+        # embed nodes; a topic with no keyword overlap should seed semantically,
+        # NOT dump the whole brain
+        db.set_embedding(self.conn, self.a, [1.0, 0.0])   # transformer architectures
+        db.set_embedding(self.conn, self.b, [0.9, 0.1])   # attention
+        db.set_embedding(self.conn, self.c, [0.0, 1.0])   # football (far)
+        self.conn.commit()
+        orig_key, orig_embed = llm.have_key, llm.embed
+        llm.have_key = lambda: True
+        llm.embed = lambda *a, **k: [1.0, 0.0]            # query ~ a/b, not c
+        try:
+            nodes, fb = graph.collect_context_nodes(self.conn, topic="neural nets", depth=0)
+        finally:
+            llm.have_key, llm.embed = orig_key, orig_embed
+        self.assertFalse(fb)               # semantic seeds found → not a whole-brain dump
+        self.assertIn(self.a, nodes)
+        self.assertNotIn(self.c, nodes)    # football excluded (below similarity floor)
 
     def test_hub_cap_floor_and_scaling(self):
         # sparse graph -> floor

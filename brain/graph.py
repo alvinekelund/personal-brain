@@ -60,19 +60,35 @@ def hub_cap(conn, floor: int = 5, factor: float = 2.0) -> int:
     return max(floor, int(round(mean * factor)))
 
 
+SEMANTIC_SEED_MIN_SIM = 0.4   # cosine floor for using a node as a context seed
+
+
+def _semantic_seeds(conn, topic: str, min_weight: float) -> list:
+    """Embedding-based seeds for a topic (deterministic cosine ranking). Returns
+    node ids above the similarity floor, or [] if embeddings/key are unavailable."""
+    try:
+        if not llm.have_key():
+            return []
+        ranked = semantic_search(conn, llm.embed(topic), min_weight=min_weight, limit=6)
+    except Exception:
+        return []
+    return [r["id"] for score, r in ranked if score >= SEMANTIC_SEED_MIN_SIM]
+
+
 def collect_context_nodes(conn, topic: str = "", depth: int = 3, min_weight: float = 0.2):
     """Gather the node set for a context document.
 
-    Returns (nodes_dict, used_fallback). When a topic is given, seed from the
-    (stem-aware) keyword search and BFS-expand for connected context. If keyword
-    search finds nothing, fall back to the whole high-weight brain — the
-    synthesis step is topic-aware and focuses the document regardless, so this
-    is reliable without a brittle LLM seed-picker.
+    Returns (nodes_dict, used_fallback). For a topic: seed from (stem-aware)
+    keyword search; if that misses, fall back to embedding-based semantic seeds
+    (deterministic cosine); only if that also finds nothing do we dump the whole
+    high-weight brain. Seeds are BFS-expanded for connected context.
     """
     used_fallback = False
     if topic:
         seeds = db.search_nodes(conn, topic, min_weight=min_weight)
         start_ids = [n["id"] for n in seeds]
+        if not start_ids:
+            start_ids = _semantic_seeds(conn, topic, min_weight)  # meaning-based fallback
         if not start_ids:
             used_fallback = True
             start_ids = [n["id"] for n in db.all_nodes(conn, min_weight=min_weight)]
