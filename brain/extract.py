@@ -454,7 +454,66 @@ def reorganize(conn, user: str):
             except (TypeError, ValueError):
                 pass
     conn.commit()
+    subgroup_categories(conn)  # split any bloated category into sub-categories
     return (len(edge_ids), rescored)
+
+
+SUBGROUP_THRESHOLD = 12   # categories with more direct children than this get split
+
+
+def _subgroup_one(conn, db, cat, children):
+    names = [c["name"] for c in children]
+    prompt = (
+        f'The category "{cat["name"]}" has too many items:\n{json.dumps(names, ensure_ascii=False)}\n\n'
+        f'Cluster them into 2-5 coherent sub-categories; each item goes in exactly one. '
+        f'Return ONLY JSON: {{"groups": [{{"name": "sub-category", "members": ["item", ...]}}]}}'
+    )
+    try:
+        data = llm.parse_json(llm.generate(prompt, response_json=True))
+    except Exception:
+        return 0
+    groups = data.get("groups", []) if isinstance(data, dict) else []
+    by_name = {c["name"].lower(): c for c in children}
+    moved = 0
+    for g in groups:
+        gname = (g.get("name") or "").strip()
+        members = [by_name.get((m or "").strip().lower()) for m in g.get("members", [])]
+        members = [m for m in members if m]
+        if not gname or gname.lower() == cat["name"].lower() or len(members) < 2:
+            continue
+        existing = db.get_node_by_name(conn, gname)
+        sub_id = existing["id"] if existing else db.add_node(
+            conn, name=gname, type_="category", source="subgroup", importance=0.8)
+        db.add_edge(conn, sub_id, cat["id"], "part_of")  # sub-category under the category
+        for m in members:
+            for e in db.edges_for_node(conn, m["id"]):
+                if (e["source_id"] == m["id"] and e["target_id"] == cat["id"]
+                        and e["relation"] == "part_of"):
+                    db.delete_edge(conn, e["id"])
+            db.add_edge(conn, m["id"], sub_id, "part_of")
+            moved += 1
+    return moved
+
+
+def subgroup_categories(conn, threshold: int = SUBGROUP_THRESHOLD) -> int:
+    """Split oversized categories into LLM-clustered sub-categories, so a big area
+    gets real sub-structure instead of a flat list. Returns nodes re-parented.
+    No-ops without an API key (keeps tests hermetic)."""
+    from brain import db
+
+    if not llm.have_key():
+        return 0
+    moved = 0
+    for cat in [n for n in db.all_nodes(conn) if n["type"] == "category"]:
+        child_edges = [e for e in db.edges_for_node(conn, cat["id"])
+                       if e["target_id"] == cat["id"] and e["relation"] == "part_of"]
+        children = [db.get_node(conn, e["source_id"]) for e in child_edges]
+        children = [c for c in children if c and c["type"] != "category"]  # leave sub-cats alone
+        if len(children) > threshold:
+            moved += _subgroup_one(conn, db, cat, children)
+    if moved:
+        conn.commit()
+    return moved
 
 
 def ingest(conn, raw: str, source: str = "", user: str = ""):

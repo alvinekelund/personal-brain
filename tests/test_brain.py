@@ -9,6 +9,7 @@ context seeding, and .env loading. The LLM (Gemini) boundary is mocked, so these
 tests are deterministic and need no API key or network.
 """
 import io
+import json
 import os
 import sys
 import tempfile
@@ -272,6 +273,50 @@ class ReorganizeTests(BrainTestCase):
         self.assertEqual(rescored, 2)
         self.assertEqual(db.get_node_by_name(self.conn, "Hobbies")["type"], "category")
         self.assertAlmostEqual(db.get_node_by_name(self.conn, "football")["importance"], 0.6, places=2)
+
+
+class SubgroupTests(BrainTestCase):
+    def test_oversized_category_is_split(self):
+        cat = db.add_node(self.conn, "Learning", type_="category")
+        for i in range(14):
+            k = db.add_node(self.conn, f"topic{i}", type_="concept")
+            db.add_edge(self.conn, k, cat, "part_of")
+        self.conn.commit()
+        resp = json.dumps({"groups": [
+            {"name": "Group A", "members": [f"topic{i}" for i in range(7)]},
+            {"name": "Group B", "members": [f"topic{i}" for i in range(7, 14)]},
+        ]})
+        orig_gen, orig_key = llm.generate, llm.have_key
+        llm.generate = lambda *a, **k: resp
+        llm.have_key = lambda: True
+        try:
+            moved = extract.subgroup_categories(self.conn, threshold=12)
+        finally:
+            llm.generate, llm.have_key = orig_gen, orig_key
+        self.assertEqual(moved, 14)
+        ga = db.get_node_by_name(self.conn, "Group A")
+        self.assertEqual(ga["type"], "category")
+        # Group A sits under Learning; topic0 sits under Group A, not Learning
+        ga_parents = {e["target_id"] for e in db.edges_for_node(self.conn, ga["id"])
+                      if e["source_id"] == ga["id"] and e["relation"] == "part_of"}
+        self.assertIn(cat, ga_parents)  # cat is the id returned by add_node
+        t0 = db.get_node_by_name(self.conn, "topic0")
+        t0_parents = {e["target_id"] for e in db.edges_for_node(self.conn, t0["id"])
+                      if e["source_id"] == t0["id"] and e["relation"] == "part_of"}
+        self.assertIn(ga["id"], t0_parents)
+        self.assertNotIn(cat, t0_parents)
+
+    def test_small_category_untouched(self):
+        cat = db.add_node(self.conn, "Tiny", type_="category")
+        for i in range(3):
+            db.add_edge(self.conn, db.add_node(self.conn, f"x{i}", type_="concept"), cat, "part_of")
+        self.conn.commit()
+        orig = llm.have_key
+        llm.have_key = lambda: True  # even with a key, below threshold → no LLM, no change
+        try:
+            self.assertEqual(extract.subgroup_categories(self.conn, threshold=12), 0)
+        finally:
+            llm.have_key = orig
 
 
 class ClearTests(BrainTestCase):
