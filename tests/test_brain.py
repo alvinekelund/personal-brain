@@ -751,6 +751,21 @@ class GraphTests(BrainTestCase):
         res = graph.answer_question(self.conn, "anything?")
         self.assertEqual(res["sources"], [])
 
+    def test_answer_question_includes_neighbors(self):
+        f = db.add_node(self.conn, "Football", type_="concept", content="a sport Alvin plays")
+        b = db.add_node(self.conn, "Bjorn", type_="person", content="Alvin's friend")
+        db.add_edge(self.conn, b, f, "relates_to")  # Bjorn connected to Football
+        self.conn.commit()
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "ans")[1]
+        try:
+            res = graph.answer_question(self.conn, "football")
+        finally:
+            llm.generate = orig
+        self.assertIn("Football", res["sources"])        # the match is a source
+        self.assertIn("Bjorn", captured["p"])            # neighbor pulled into context
+
     def test_synthesize_context_is_importance_ordered(self):
         nodes = {
             "1": {"name": "Trivial detail", "type": "concept", "content": "x",

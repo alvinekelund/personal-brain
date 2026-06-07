@@ -207,28 +207,45 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0) ->
     """Answer a natural-language question from the brain: retrieve the most
     relevant nodes (semantic, falling back to keyword) and have the LLM answer
     using only them. Accessing them reinforces them. Returns {answer, sources}."""
-    nodes = []
+    seeds = []
     try:
         if llm.have_key():
-            nodes = [r for _, r in semantic_search(conn, llm.embed(question),
+            seeds = [r for _, r in semantic_search(conn, llm.embed(question),
                                                    min_weight=min_weight, limit=k)]
     except Exception:
-        nodes = []
-    if not nodes:
-        nodes = db.search_nodes(conn, question, min_weight=min_weight)[:k]
-    if not nodes:
+        seeds = []
+    if not seeds:
+        seeds = db.search_nodes(conn, question, min_weight=min_weight)[:k]
+    if not seeds:
         return {"answer": "I don't have anything on that yet.", "sources": []}
 
-    ctx = "\n".join(f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in nodes)
+    # pull in 1-hop neighbors of the matches for connected context (capped)
+    seed_ids = {n["id"] for n in seeds}
+    neighbors: dict = {}
+    for n in seeds:
+        for e in db.edges_for_node(conn, n["id"]):
+            oid = e["target_id"] if e["source_id"] == n["id"] else e["source_id"]
+            if oid not in seed_ids and oid not in neighbors:
+                o = db.get_node(conn, oid)
+                if o and not o["archived"]:
+                    neighbors[oid] = o
+        if len(neighbors) >= 12:
+            break
+
+    lines = [f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in seeds]
+    if neighbors:
+        lines.append("Related:")
+        lines += [f"- {o['name']} ({o['type']}): {o['content'] or ''}"
+                  for o in list(neighbors.values())[:12]]
     prompt = (
         "Answer the question using ONLY the following knowledge about the person. "
         "If the answer isn't contained in it, say you don't have that. Be concise and direct.\n\n"
-        f"Knowledge:\n{ctx}\n\nQuestion: {question}"
+        f"Knowledge:\n{chr(10).join(lines)}\n\nQuestion: {question}"
     )
-    for n in nodes:  # asking accesses these memories → reinforce them
+    for n in seeds:  # asking accesses these memories → reinforce them
         db.touch_node(conn, n["id"])
     conn.commit()
-    return {"answer": llm.generate(prompt).strip(), "sources": [n["name"] for n in nodes]}
+    return {"answer": llm.generate(prompt).strip(), "sources": [n["name"] for n in seeds]}
 
 
 def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:
