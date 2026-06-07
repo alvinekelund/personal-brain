@@ -107,6 +107,7 @@ brain tree                       # print the person-rooted hierarchy
 brain reorganize                 # retrofit existing flat nodes into the hierarchy
 
 # Maintenance
+brain digest                     # at-a-glance: top of mind, open tasks, fading, by area
 brain status                     # stats + decay report + what's fading soon
 brain synthesize                 # find and surface new connections
 brain reindex                    # (re)compute embeddings for semantic search

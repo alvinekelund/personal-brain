@@ -691,6 +691,18 @@ class GraphTests(BrainTestCase):
         self.assertIn(self.a, nodes)
         self.assertNotIn(self.c, nodes)    # football excluded (below similarity floor)
 
+    def test_digest(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        db.add_node(self.conn, "Master's Thesis", type_="project", importance=0.95)
+        db.add_node(self.conn, "trivia", type_="concept", importance=0.1)
+        db.add_node(self.conn, "email advisor", type_="task", importance=0.3)
+        self.conn.commit()
+        d = graph.digest(self.conn, "Alvin")
+        self.assertEqual(d["top"][0]["name"], "Master's Thesis")   # highest importance first
+        self.assertIn("email advisor", d["tasks"])                  # open tasks listed
+        self.assertNotIn("Alvin", [t["name"] for t in d["top"]])    # identity excluded
+        self.assertIn("areas", d)
+
     def test_category_breakdown(self):
         db.ensure_identity_anchor(self.conn, "Alvin")
         root = db.get_node_by_name(self.conn, "Alvin")["id"]

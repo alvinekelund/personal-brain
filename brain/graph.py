@@ -2,7 +2,7 @@
 import json
 import math
 from collections import deque
-from brain import db, llm
+from brain import db, decay, llm
 
 
 def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2,
@@ -149,6 +149,24 @@ def children_map(conn) -> dict:
         if e["relation"] == "part_of":
             m.setdefault(e["target_id"], []).append(e["source_id"])
     return m
+
+
+def digest(conn, user: str = "", top: int = 6) -> dict:
+    """A quick 'state of your brain': the highest-importance items, open tasks,
+    what's fading, and the life-area balance. Deterministic (no LLM)."""
+    def imp(n):
+        return n["importance"] if "importance" in n.keys() else 0.5
+
+    nodes = [n for n in db.all_nodes(conn)
+             if n["type"] != "category" and n["name"].lower() != (user or "").lower()]
+    top_nodes = sorted(nodes, key=lambda n: (-imp(n), -n["weight"]))[:top]
+    return {
+        "top": [{"name": n["name"], "type": n["type"], "importance": round(imp(n), 2)}
+                for n in top_nodes],
+        "tasks": [n["name"] for n in nodes if n["type"] == "task"],
+        "fading": decay.at_risk_nodes(conn),
+        "areas": category_breakdown(conn, user),
+    }
 
 
 def category_breakdown(conn, user: str = "") -> list:

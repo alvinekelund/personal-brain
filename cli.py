@@ -248,6 +248,31 @@ def tree(min_weight):
         render(r, 0)
 
 
+# ── digest ────────────────────────────────────────────────────────────────────
+
+@cli.command()
+def digest():
+    """A quick 'state of your brain' — what's important, fading, and open."""
+    conn = db.connect()
+    _run_decay(conn)
+    d = graph.digest(conn, config.get_user())
+    if d["top"]:
+        click.echo("Top of mind:")
+        for t in d["top"]:
+            click.echo(f"  [{t['type']:8s}] {t['name']}  (imp {t['importance']})")
+    if d["tasks"]:
+        click.echo("Open tasks:")
+        for t in d["tasks"]:
+            click.echo(f"  - {t}")
+    if d["fading"]:
+        click.echo("Fading soon:")
+        for f in d["fading"]:
+            left = "soon" if f["days_left"] < 1 else f"~{f['days_left']:.0f}d"
+            click.echo(f"  - {f['name']} ({left})")
+    if d["areas"]:
+        click.echo("By area: " + ", ".join(f"{n} ({c})" for n, c in d["areas"]))
+
+
 # ── status ────────────────────────────────────────────────────────────────────
 
 @cli.command()

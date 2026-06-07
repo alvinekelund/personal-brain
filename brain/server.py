@@ -122,6 +122,7 @@ _UI = """
   <button onclick="bSynth()">Synthesize</button>
   <button onclick="bReorg()">Reorganize</button>
   <button onclick="bStatus()">Status</button>
+  <button onclick="bDigest()">Digest</button>
   <button onclick="bTree()">Tree</button>
   <a href="?view=2d" style="color:#9aa;font-size:12px;align-self:center">2D</a>
   <a href="?view=3d" style="color:#9aa;font-size:12px;align-self:center">3D</a>
@@ -156,6 +157,12 @@ async function bStatus(){const j=await (await fetch('/status')).json(),s=j.stats
  h+=(j.areas||[]).map(a=>'• '+esc(a[0])+' ('+a[1]+')').join('\\n')||'(none)';h+='\\n\\nFading soon:\\n';
  h+=(j.fading||[]).map(f=>'• ['+f.type+'] '+esc(f.name)+' w='+f.weight.toFixed(2)).join('\\n')||'(none)';show('Status',h);}
 async function bTree(){const t=await (await fetch('/tree')).text();show('Hierarchy',esc(t));}
+async function bDigest(){const j=await (await fetch('/digest')).json();
+ let h='<b>Top of mind</b><br>'+(j.top||[]).map(t=>'• ['+t.type+'] '+esc(t.name)+' ('+t.importance+')').join('<br>');
+ if((j.tasks||[]).length)h+='<br><br><b>Open tasks</b><br>'+j.tasks.map(esc).join('<br>');
+ if((j.fading||[]).length)h+='<br><br><b>Fading soon</b><br>'+j.fading.map(f=>'• '+esc(f.name)).join('<br>');
+ if((j.areas||[]).length)h+='<br><br><b>By area</b><br>'+j.areas.map(a=>esc(a[0])+' ('+a[1]+')').join('<br>');
+ show('Digest',h);}
 function showNode(j){ if(j.error){show('Node',j.error);return;}
  let b='importance '+j.importance+' · weight '+j.weight+'<br><br>'+esc(j.content)+'<br><br><b>connections</b><br>';
  b+=(j.edges||[]).map(e=>'• '+e.dir+' '+e.rel+' '+esc(e.other)).join('<br>')||'(none)';
@@ -210,6 +217,8 @@ def make_handler(interval: float):
                     self._json(api_ask(conn, qs.get("q", [""])[0]))
                 elif u.path == "/status":
                     self._json(api_status(conn))
+                elif u.path == "/digest":
+                    self._json(graph.digest(conn, config.get_user()))
                 elif u.path == "/tree":
                     self._send(api_tree(conn), "text/plain")
                 elif u.path == "/node":
