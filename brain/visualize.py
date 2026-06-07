@@ -136,14 +136,63 @@ def build_html(
     return net.generate_html()
 
 
+_HTML_3D = """<!doctype html><html><head><meta charset="utf-8"><title>Brain (3D)</title>
+<style>body{margin:0;background:#0b0b16;overflow:hidden}#g{width:100vw;height:100vh}</style>
+<script src="https://unpkg.com/3d-force-graph"></script></head><body>
+<div id="g"></div>
+<script>
+const DATA = __DATA__;
+const G = ForceGraph3D()(document.getElementById('g'))
+  .backgroundColor('#0b0b16')
+  .graphData(DATA)
+  .nodeLabel(n => '<div style="background:#16213e;color:#eee;padding:6px 8px;border-radius:6px;font:13px sans-serif;max-width:280px">'
+                 + '<b>' + n.name + '</b> [' + n.type + ']<br>' + (n.desc||'') + '</div>')
+  .nodeColor('color').nodeVal('val').nodeOpacity(0.92)
+  .linkColor('color').linkWidth(l => l.po ? 1.5 : 0.5).linkOpacity(0.5)
+  .linkDirectionalArrowLength(l => l.po ? 3.5 : 0).linkDirectionalArrowRelPos(1);
+</script></body></html>"""
+
+
+def build_html_3d(conn, min_weight: float = 0.0, type_filter: str | None = None) -> str:
+    """Return a standalone 3D force-graph (WebGL via 3d-force-graph, CDN). No
+    Python deps — nodes/edges are inlined as JSON."""
+    import json
+    nodes = db.all_nodes(conn, min_weight=min_weight)
+    if type_filter:
+        nodes = [n for n in nodes if n["type"] == type_filter]
+    node_ids = {n["id"] for n in nodes}
+    edges = [e for e in db.all_edges(conn)
+             if e["source_id"] in node_ids and e["target_id"] in node_ids]
+
+    def imp(n):
+        return n["importance"] if "importance" in n.keys() else 0.5
+
+    gnodes = [{
+        "id": n["id"], "name": n["name"], "type": n["type"],
+        "color": TYPE_COLORS.get(n["type"], DEFAULT_COLOR),
+        "val": 10 if n["type"] == "category" else 2 + imp(n) * 6,
+        "desc": (n["content"] or "")[:160],
+    } for n in nodes]
+    glinks = [{
+        "source": e["source_id"], "target": e["target_id"],
+        "po": e["relation"] == "part_of",
+        "color": "#8a97a6" if e["relation"] == "part_of" else "#3a3a5a",
+    } for e in edges]
+    return _HTML_3D.replace("__DATA__", json.dumps({"nodes": gnodes, "links": glinks}))
+
+
 def show(
     conn,
     min_weight: float = 0.0,
     type_filter: str | None = None,
     color_by: str = "type",
+    threed: bool = False,
 ):
-    """Render the graph and open it in the default browser."""
-    html = build_html(conn, min_weight=min_weight, type_filter=type_filter, color_by=color_by)
+    """Render the graph and open it in the default browser (2D Pyvis, or 3D WebGL)."""
+    if threed:
+        html = build_html_3d(conn, min_weight=min_weight, type_filter=type_filter)
+    else:
+        html = build_html(conn, min_weight=min_weight, type_filter=type_filter, color_by=color_by)
     tmp = tempfile.NamedTemporaryFile(
         suffix=".html", delete=False, mode="w", encoding="utf-8"
     )

@@ -91,11 +91,13 @@ def add(text, file_path, url, source):
 @click.option("--min-weight", default=0.0, show_default=True)
 @click.option("--type", "type_filter", default=None)
 @click.option("--color-by", default="type", type=click.Choice(["type", "cluster"]), show_default=True)
-def show(min_weight, type_filter, color_by):
-    """Open interactive graph in browser."""
+@click.option("--3d", "threed", is_flag=True, help="render an interactive 3D (WebGL) graph")
+def show(min_weight, type_filter, color_by, threed):
+    """Open interactive graph in browser (2D, or 3D with --3d)."""
     conn = db.connect()
     _run_decay(conn)
-    path = visualize.show(conn, min_weight=min_weight, type_filter=type_filter, color_by=color_by)
+    path = visualize.show(conn, min_weight=min_weight, type_filter=type_filter,
+                          color_by=color_by, threed=threed)
     click.echo(f"Graph opened: {path}")
 
 

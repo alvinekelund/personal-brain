@@ -207,6 +207,21 @@ class IngestTests(BrainTestCase):
         self.assertTrue(parents)  # placed under a category, not floating
 
 
+class Visualize3DTests(BrainTestCase):
+    def test_build_html_3d_inlines_data(self):
+        import brain.visualize as visualize
+        a = db.add_node(self.conn, "Transformers", type_="concept", content="nets")
+        b = db.add_node(self.conn, "Alvin", type_="person")
+        db.add_edge(self.conn, a, b, "studied_by")
+        self.conn.commit()
+        html = visualize.build_html_3d(self.conn)
+        self.assertIn("3d-force-graph", html)   # WebGL library
+        self.assertIn("ForceGraph3D", html)
+        self.assertIn("Transformers", html)     # node data inlined
+        self.assertIn('"links"', html)
+        self.assertNotIn("__DATA__", html)      # placeholder substituted
+
+
 class ServerApiTests(BrainTestCase):
     def test_api_status(self):
         from brain import server

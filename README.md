@@ -86,8 +86,9 @@ brain add --file notes.txt
 brain add --url https://arxiv.org/abs/1706.03762
 
 # Explore
-brain serve                      # live web view with a "talk to your brain" box; graph reloads as it grows
-brain show                       # open a one-shot interactive graph
+brain serve                      # live web app (add/search/context/synthesize) with a 2D/3D toggle
+brain show                       # one-shot interactive 2D graph
+brain show --3d                  # interactive 3D (WebGL) graph
 brain show --min-weight 0.3      # hide faded nodes
 brain show --type concept        # filter by type
 

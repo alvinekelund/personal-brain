@@ -101,6 +101,8 @@ _UI = """
   <button onclick="bReorg()">Reorganize</button>
   <button onclick="bStatus()">Status</button>
   <button onclick="bTree()">Tree</button>
+  <a href="?view=2d" style="color:#9aa;font-size:12px;align-self:center">2D</a>
+  <a href="?view=3d" style="color:#9aa;font-size:12px;align-self:center">3D</a>
   <span id="bxmsg"></span>
 </div>
 <div id="panel"><span class="close" onclick="document.getElementById('panel').style.display='none'">✕</span><div id="pc"></div></div>
@@ -131,9 +133,9 @@ setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim(
 """
 
 
-def render_page(conn, interval: float) -> str:
+def render_page(conn, interval: float, view: str = "2d") -> str:
     decay.run_decay(conn)
-    html = visualize.build_html(conn)
+    html = visualize.build_html_3d(conn) if view == "3d" else visualize.build_html(conn)
     ui = _UI % {"fp": fingerprint(conn), "ms": int(interval * 1000)}
     return html.replace("</body>", ui + "</body>", 1) if "</body>" in html else html + ui
 
@@ -167,7 +169,7 @@ def make_handler(interval: float):
                 elif u.path == "/tree":
                     self._send(api_tree(conn), "text/plain")
                 else:
-                    self._send(render_page(conn, interval))
+                    self._send(render_page(conn, interval, qs.get("view", ["2d"])[0]))
             finally:
                 conn.close()
 
