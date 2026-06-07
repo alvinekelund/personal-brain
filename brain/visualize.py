@@ -94,7 +94,15 @@ def build_html(
         cluster_colors = _community_colors(nodes, edges)
 
     for n in nodes:
-        size = 10 + n["weight"] * 28
+        importance = n["importance"] if "importance" in n.keys() else 0.5
+        # size by structural role + importance + weight: categories largest, then
+        # important nodes; weight adds a little so faded nodes shrink.
+        if n["type"] == "category":
+            size = 34
+        elif n["type"] == "person":
+            size = 24 + importance * 12
+        else:
+            size = 12 + importance * 16 + n["weight"] * 8
         if color_by == "cluster":
             color = cluster_colors.get(n["id"], DEFAULT_COLOR)
         else:
@@ -103,21 +111,27 @@ def build_html(
         title = (
             f"<b>{n['name']}</b><br>"
             f"type: {n['type']}<br>"
-            f"weight: {n['weight']:.2f} &nbsp; confidence: {n['confidence']:.2f}<br><br>"
+            f"weight: {n['weight']:.2f} &nbsp; importance: {importance:.2f} "
+            f"&nbsp; confidence: {n['confidence']:.2f}<br><br>"
             f"{n['content'] or ''}"
         )
-        net.add_node(n["id"], label=n["name"], title=title, size=size, color=color)
+        net.add_node(n["id"], label=n["name"], title=title, size=size, color=color,
+                     borderWidth=3 if n["type"] == "category" else 1)
 
     for e in edges:
-        if e["source_id"] in node_ids and e["target_id"] in node_ids:
-            width = 1 + e["weight"] * 3
-            net.add_edge(
-                e["source_id"],
-                e["target_id"],
-                title=f"{e['relation']}  (w={e['weight']:.2f}, ×{e['reinforcement_count']})",
-                label=e["relation"],
-                width=width,
-            )
+        if e["source_id"] not in node_ids or e["target_id"] not in node_ids:
+            continue
+        if e["relation"] == "part_of":
+            # the hierarchy backbone: solid, prominent, arrow toward the parent,
+            # no label (the structure speaks for itself)
+            net.add_edge(e["source_id"], e["target_id"], color="#6C7A89",
+                         width=2.5, arrows="to",
+                         title=f"part_of (w={e['weight']:.2f})")
+        else:
+            # cross-links: lighter and dashed, labelled with the relation
+            net.add_edge(e["source_id"], e["target_id"], color="#3a3a5a",
+                         width=1 + e["weight"] * 2, dashes=True, label=e["relation"],
+                         title=f"{e['relation']}  (w={e['weight']:.2f}, ×{e['reinforcement_count']})")
 
     return net.generate_html()
 
