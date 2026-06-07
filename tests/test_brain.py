@@ -772,6 +772,45 @@ class PortabilityTests(BrainTestCase):
         self.assertEqual(len(db.all_edges(dest)), 1)
 
 
+class LLMRetryTests(unittest.TestCase):
+    class _FakeResp:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return b'{"ok": 1}'
+
+    def _run(self, fake_urlopen):
+        import urllib.request as ur
+        orig_open, orig_backoff = ur.urlopen, llm.BACKOFF
+        ur.urlopen, llm.BACKOFF = fake_urlopen, 0
+        try:
+            return llm._request(object(), timeout=1)
+        finally:
+            ur.urlopen, llm.BACKOFF = orig_open, orig_backoff
+
+    def test_retries_transient_then_succeeds(self):
+        calls = {"n": 0}
+        def flaky(req, timeout):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConnectionResetError("dropped")  # transient (OSError)
+            return self._FakeResp()
+        self.assertEqual(self._run(flaky), {"ok": 1})
+        self.assertEqual(calls["n"], 2)  # failed once, retried, succeeded
+
+    def test_4xx_fails_fast_without_retry(self):
+        import urllib.error as ue
+        calls = {"n": 0}
+        def bad_key(req, timeout):
+            calls["n"] += 1
+            raise ue.HTTPError("u", 400, "bad", {}, None)
+        with self.assertRaises(ue.HTTPError):
+            self._run(bad_key)
+        self.assertEqual(calls["n"], 1)  # 4xx not retried
+
+
 class ParseJsonTests(unittest.TestCase):
     def test_plain(self):
         self.assertEqual(llm.parse_json('{"a": 1}'), {"a": 1})

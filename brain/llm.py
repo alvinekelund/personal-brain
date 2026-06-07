@@ -5,12 +5,32 @@ talk to the generativelanguage REST API directly. Only the standard library is u
 """
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_MODEL = "gemini-2.5-flash"
 EMBED_MODEL = "gemini-embedding-001"
+RETRIES = 2          # extra attempts on transient failures
+BACKOFF = 1.5        # seconds, multiplied by attempt number
+
+
+def _request(req, timeout):
+    """POST and parse JSON, retrying transient failures (5xx, dropped
+    connections, timeouts). 4xx (bad key/request) fail fast — no point retrying.
+    """
+    for attempt in range(RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == RETRIES:
+                raise
+        except OSError:  # URLError, ConnectionError (incl. RemoteDisconnected), timeout
+            if attempt == RETRIES:
+                raise
+        time.sleep(BACKOFF * (attempt + 1))
 
 
 def api_key() -> str:
@@ -36,14 +56,13 @@ def embed(text: str, model: str = EMBED_MODEL, timeout: float = 30.0) -> list:
         headers={"Content-Type": "application/json", "x-goog-api-key": api_key()},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode())
+        data = _request(req, timeout)
     except urllib.error.HTTPError as e:
         raise RuntimeError(
             f"Gemini embeddings error {e.code}: {e.read().decode(errors='replace')[:300]}"
         ) from None
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Could not reach Gemini embeddings API: {e.reason}") from None
+    except OSError as e:
+        raise RuntimeError(f"Could not reach Gemini embeddings API: {e}") from None
     try:
         return data["embedding"]["values"]
     except (KeyError, TypeError):
@@ -98,8 +117,7 @@ def generate(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode())
+        data = _request(req, timeout)
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:400]
         hint = ""
@@ -109,8 +127,8 @@ def generate(
                 "https://aistudio.google.com/apikey and update ~/.personal-brain/.env"
             )
         raise RuntimeError(f"Gemini API error {e.code}: {detail}{hint}") from None
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Could not reach Gemini API: {e.reason}") from None
+    except OSError as e:
+        raise RuntimeError(f"Could not reach Gemini API: {e}") from None
 
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"]
