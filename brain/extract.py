@@ -59,8 +59,14 @@ Hierarchy — organise everything into a tree rooted at the person:
   (e.g. a friend's parent is "Relationships" or "People", NOT the person.)
 - a specific thing's parent is its category or a more specific node under one
   (parent of "Game on Sunday" is "Football"; parent of "Football" is "Hobbies").
-- REUSE existing categories when one fits; don't invent near-duplicates. Keep the
-  number of top-level categories small.
+- REUSE existing categories when one genuinely fits; don't invent near-duplicates.
+- categories are DISTINCT, non-overlapping life-areas. Put each node in the single
+  best-fitting one; if none fits well, create a more specific category rather than
+  forcing it into a loosely-related one. Do NOT overload one category as a catch-all:
+    * a coding skill / side project → "Skills" or "Projects" (NOT "Education")
+    * a book, topic, or interest you follow → "Learning" or "Interests"
+    * a job / employer / work → "Career"
+    * studies / degree / university → "Education"
 - "parent" only sets the backbone; still add cross-links between nodes via edges
   (e.g. a friend relates_to a hobby) — the result is a tree plus cross-edges."""
 
