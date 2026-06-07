@@ -87,6 +87,9 @@ def add(text, file_path, url, source):
     node_ids, edge_ids = extract.merge_into_db(conn, extracted, source, raw, entity_links=entity_links)
     click.echo(f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s).")
 
+    # best-effort: embed new nodes so semantic search works without manual reindex
+    extract.embed_nodes(conn, node_ids)
+
     for n in new_nodes[:5]:
         display = entity_links.get(n["name"], n["name"])
         click.echo(f"  [{n.get('type', '?')}] {display}")

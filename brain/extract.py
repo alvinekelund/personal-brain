@@ -197,3 +197,27 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str, entity_link
     conn.commit()
 
     return node_ids, edge_ids
+
+
+def embed_nodes(conn, node_ids) -> int:
+    """Best-effort: compute & store embeddings for nodes that lack one.
+
+    Lets semantic search work right after `brain add` without a manual reindex.
+    Embeddings are an optimization, not required for ingestion, so per-node
+    failures (offline, API error) are swallowed. Returns the count embedded.
+    """
+    from brain import db
+
+    done = 0
+    for nid in node_ids:
+        node = db.get_node(conn, nid)
+        if not node or node["embedding"]:
+            continue
+        try:
+            db.set_embedding(conn, nid, llm.embed(f"{node['name']}. {node['content'] or ''}"))
+            done += 1
+        except Exception:
+            continue
+    if done:
+        conn.commit()
+    return done

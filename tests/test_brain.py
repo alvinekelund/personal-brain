@@ -455,6 +455,37 @@ class SemanticSearchTests(BrainTestCase):
         self.conn.commit()
         self.assertEqual(graph.semantic_search(self.conn, [1.0, 0.0]), [])
 
+    def test_embed_nodes_populates_and_is_searchable(self):
+        a = db.add_node(self.conn, "rust", type_="concept", content="systems lang")
+        b = db.add_node(self.conn, "go", type_="concept", content="another lang")
+        self.conn.commit()
+        orig = llm.embed
+        llm.embed = lambda text, *a, **k: [1.0, 0.0] if "rust" in text.lower() else [0.0, 1.0]
+        try:
+            n = extract.embed_nodes(self.conn, [a, b])
+        finally:
+            llm.embed = orig
+        self.assertEqual(n, 2)
+        top = graph.semantic_search(self.conn, [1.0, 0.0], limit=1)
+        self.assertEqual(top[0][1]["name"], "rust")
+
+    def test_embed_nodes_skips_already_embedded_and_swallows_errors(self):
+        a = db.add_node(self.conn, "has-emb", type_="concept")
+        b = db.add_node(self.conn, "boom", type_="concept")
+        db.set_embedding(self.conn, a, [0.5, 0.5])
+        self.conn.commit()
+
+        def boom(*a, **k):
+            raise RuntimeError("API down")
+
+        orig = llm.embed
+        llm.embed = boom
+        try:
+            n = extract.embed_nodes(self.conn, [a, b])  # a skipped, b errors -> swallowed
+        finally:
+            llm.embed = orig
+        self.assertEqual(n, 0)  # nothing newly embedded, no exception raised
+
 
 class PortabilityTests(BrainTestCase):
     def _seed(self):
