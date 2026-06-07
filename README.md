@@ -125,6 +125,32 @@ brain import backup.json         # merge a JSON export back in (skips duplicates
 
 ---
 
+## Web app
+
+```bash
+brain serve          # opens http://127.0.0.1:8000 in your browser
+```
+
+A live, single-page app over the same brain — keep it open and watch the graph
+evolve as you think out loud:
+
+- **Talk to your brain** — type a thought in the box; it's ingested and the graph
+  reloads with the new nodes (no second terminal).
+- **Everything inline** — search (keyword or semantic), build a context document,
+  run synthesize / reorganize, and view status & the hierarchy, all from a control
+  bar with results in a side panel.
+- **2D or 3D** — toggle between the Pyvis force-graph and a WebGL 3D force-graph;
+  categories are hubs, the `part_of` backbone shows directional arrows.
+- **Explore** — a min-weight slider fades out trivia; click any node to see its
+  content, importance, weight, and connections.
+- **Live** — the page only reloads when the brain actually changes (it polls a
+  cheap state fingerprint), so it never flickers when idle.
+
+It's stdlib-only (`http.server`) and binds to localhost — your data never leaves
+your machine.
+
+---
+
 ## Architecture
 
 ```
