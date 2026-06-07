@@ -66,10 +66,31 @@ class DecayTests(BrainTestCase):
         self.assertEqual(w, 1.0)
 
     def test_archives_below_threshold(self):
-        nid = db.add_node(self.conn, "Ephemeral", type_="event")  # half-life 7d
-        self._age(nid, 30)  # 0.5**(30/7) ≈ 0.05 < 0.10
+        nid = db.add_node(self.conn, "Ephemeral", type_="event", importance=0.1)  # low importance
+        self._age(nid, 45)  # H_eff=7*(1+0.4)=9.8d; 0.5**(45/9.8)≈0.04 < 0.10, floor 0.015
         decay.run_decay(self.conn)
         self.assertEqual(db.get_node(self.conn, nid)["archived"], 1)
+
+    def test_importance_stretches_half_life(self):
+        # same elapsed time: important node retains far more weight than trivial one
+        t = time.time() - 60 * DAY
+        trivial = decay.current_weight(1.0, t, 60.0, importance=0.0)
+        important = decay.current_weight(1.0, t, 60.0, importance=1.0)
+        self.assertAlmostEqual(trivial, 0.5, places=3)        # one base half-life
+        self.assertGreater(important, 0.85)                   # H_eff = 60*5 = 300d
+
+    def test_importance_floor_prevents_archive(self):
+        nid = db.add_node(self.conn, "Core skill", type_="event", importance=0.9)  # short base HL
+        self._age(nid, 3650)  # 10 years untouched
+        decay.run_decay(self.conn)
+        row = db.get_node(self.conn, nid)
+        self.assertEqual(row["archived"], 0)                  # floor 0.9*0.15=0.135 > 0.10
+        self.assertGreaterEqual(row["weight"], 0.135 - 1e-9)
+
+    def test_zero_importance_is_plain_half_life(self):
+        self.assertAlmostEqual(
+            decay.current_weight(1.0, time.time() - 60 * DAY, 60.0, importance=0.0), 0.5, places=4
+        )
 
     def test_active_node_survives(self):
         nid = db.add_node(self.conn, "Durable", type_="skill")  # half-life 180d

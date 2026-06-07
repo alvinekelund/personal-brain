@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     access_count  INTEGER NOT NULL DEFAULT 0,
     weight        REAL NOT NULL DEFAULT 1.0,
     confidence    REAL NOT NULL DEFAULT 0.8,
+    importance    REAL NOT NULL DEFAULT 0.5,
     half_life_days REAL NOT NULL DEFAULT 60.0,
     archived      INTEGER NOT NULL DEFAULT 0,
     embedding     TEXT
@@ -139,6 +140,8 @@ def _migrate(conn):
     node_cols = {row[1] for row in conn.execute("PRAGMA table_info(nodes)")}
     if "embedding" not in node_cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN embedding TEXT")
+    if "importance" not in node_cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
 
 
 def new_id():
@@ -151,16 +154,16 @@ def now():
 
 # ── Nodes ──────────────────────────────────────────────────────────────────
 
-def add_node(conn, name, type_="concept", content="", source="", confidence=0.8):
+def add_node(conn, name, type_="concept", content="", source="", confidence=0.8, importance=0.5):
     half_life = HALF_LIVES.get(type_, 60.0)
     node_id = new_id()
     t = now()
     conn.execute(
         """INSERT INTO nodes
            (id, name, type, content, source, created_at, last_accessed,
-            weight, confidence, half_life_days)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?)""",
-        (node_id, name, type_, content, source, t, t, confidence, half_life),
+            weight, confidence, importance, half_life_days)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?, ?)""",
+        (node_id, name, type_, content, source, t, t, confidence, importance, half_life),
     )
     return node_id
 

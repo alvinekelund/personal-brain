@@ -4,6 +4,8 @@ import time
 EDGE_BASE_HALF_LIFE = 90.0   # days for a once-seen edge
 EDGE_MIN_WEIGHT = 0.05       # below this, delete the edge
 ARCHIVE_THRESHOLD = 0.10     # weight below this → archived
+IMPORTANCE_GAIN = 4.0        # important nodes decay up to (1+gain)x slower
+IMPORTANCE_FLOOR = 0.15      # weight never drops below importance * this
 
 
 def days_until_archive(weight: float, half_life_days: float,
@@ -42,17 +44,22 @@ def at_risk_nodes(conn, limit: int = 5, threshold: float = ARCHIVE_THRESHOLD) ->
     ]
 
 
-def current_weight(weight: float, last_accessed: float, half_life_days: float) -> float:
-    """Half-life decay: w(t) = w0 * 0.5**(t / half_life).
+def current_weight(weight: float, last_accessed: float, half_life_days: float,
+                   importance: float = 0.0) -> float:
+    """Importance-weighted half-life decay: w(t) = w0 * 0.5**(t / H_eff), clamped
+    to an importance floor.
 
-    Uses base-1/2 so half_life_days is a *true* half-life — at t == half_life the
-    weight is exactly halved, matching the documented table. (The previous
-    exp(-t/half_life) form made half_life a mean-lifetime: 0.368 at t=H, not 0.5.)
+    Base-1/2 keeps half_life_days a *true* half-life. importance (0-1) stretches
+    the effective half-life (important nodes fade much slower) and sets a weight
+    floor, so a central fact never decays into the archive while a one-off detail
+    still does. importance=0 reproduces plain half-life decay.
     """
     if math.isinf(half_life_days):
         return weight
+    effective_hl = half_life_days * (1 + IMPORTANCE_GAIN * importance)
     days_elapsed = (time.time() - last_accessed) / 86400.0
-    return weight * 0.5 ** (days_elapsed / half_life_days)
+    decayed = weight * 0.5 ** (days_elapsed / effective_hl)
+    return max(decayed, importance * IMPORTANCE_FLOOR)
 
 
 def edge_half_life(reinforcement_count: int) -> float:
@@ -72,7 +79,7 @@ def run_decay(conn) -> dict:
     Returns counts of updated / archived / deleted nodes + edges pruned.
     """
     nodes = conn.execute(
-        "SELECT id, weight, last_accessed, half_life_days, archived FROM nodes"
+        "SELECT id, weight, last_accessed, half_life_days, archived, importance FROM nodes"
     ).fetchall()
 
     updated = archived = deleted = edges_pruned = 0
@@ -86,7 +93,9 @@ def run_decay(conn) -> dict:
                 deleted += 1
             continue
 
-        new_w = current_weight(n["weight"], n["last_accessed"], n["half_life_days"])
+        new_w = current_weight(
+            n["weight"], n["last_accessed"], n["half_life_days"], n["importance"]
+        )
         new_w = max(0.0, min(1.0, new_w))
 
         if new_w < 0.10:

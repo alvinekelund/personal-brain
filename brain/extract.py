@@ -5,7 +5,7 @@ SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
 {
   "nodes": [
-    {"name": "...", "type": "...", "content": "...", "confidence": 0.0-1.0}
+    {"name": "...", "type": "...", "content": "...", "confidence": 0.0-1.0, "importance": 0.0-1.0}
   ],
   "edges": [
     {"source": "...", "target": "...", "relation": "..."}
@@ -36,6 +36,10 @@ Rules:
 - content is 1-3 sentences explaining the node
 - edges use node names from the nodes list
 - confidence reflects how clearly the text supports this extraction
+- importance reflects how central and lasting this is to the person:
+    0.8-1.0 = identity, close relationships, core skills, long-term projects/goals
+    0.4-0.7 = ongoing interests, general knowledge, active work
+    0.1-0.3 = one-off events, errands, ephemeral details (these are meant to fade)
 - extract only what is genuinely stated or implied; don't hallucinate
 - prefer fewer high-confidence nodes over many uncertain ones
 - prefer durable entities (concepts, skills, projects, people) over recording
@@ -180,6 +184,7 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str, entity_link
                 content=n.get("content", ""),
                 source=source,
                 confidence=n.get("confidence", 0.8),
+                importance=n.get("importance", 0.5),
             )
             name_to_id[name] = nid
             name_to_id[canonical] = nid
