@@ -696,6 +696,23 @@ class SynthesizeTests(BrainTestCase):
         self.assertEqual(graph.connect_isolated_nodes(self.conn), [])
 
 
+class NodeTypeVocabTests(BrainTestCase):
+    def test_normalize_type(self):
+        self.assertEqual(db.normalize_type("concept"), "concept")
+        self.assertEqual(db.normalize_type("category"), "category")
+        self.assertEqual(db.normalize_type("hobby"), "concept")     # invented type → mapped
+        self.assertEqual(db.normalize_type("Place"), "fact")
+        self.assertEqual(db.normalize_type("company"), "organization")
+        self.assertEqual(db.normalize_type("xyzzy"), "concept")     # unknown → default
+        self.assertEqual(db.normalize_type(""), "concept")
+
+    def test_add_node_normalizes_type(self):
+        nid = db.add_node(self.conn, "Tennis", type_="hobby")
+        row = db.get_node(self.conn, nid)
+        self.assertEqual(row["type"], "concept")
+        self.assertEqual(row["half_life_days"], db.HALF_LIVES["concept"])
+
+
 class RelationVocabTests(BrainTestCase):
     def test_exact_vocab_preserved(self):
         for rel in db.RELATIONS:

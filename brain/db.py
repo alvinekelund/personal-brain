@@ -20,6 +20,27 @@ HALF_LIVES = {
     "category":     float("inf"),  # structural hierarchy nodes never decay
 }
 
+# Controlled node-type vocabulary (the keys of HALF_LIVES). The LLM occasionally
+# invents types ("hobby", "place"); normalize_type maps them back so every node
+# has a known type + half-life.
+_TYPE_SYNONYMS = {
+    "hobby": "concept", "activity": "concept", "interest": "concept",
+    "topic": "concept", "place": "fact", "location": "fact", "tool": "artifact",
+    "document": "artifact", "file": "artifact", "goal": "project", "habit": "skill",
+    "company": "organization", "team": "organization", "group": "organization",
+    "human": "person", "contact": "person", "milestone": "event", "deadline": "event",
+}
+
+
+def normalize_type(node_type: str) -> str:
+    """Map an extracted node type onto the controlled vocabulary (HALF_LIVES keys);
+    unknown types fall back to a synonym or 'concept'."""
+    t = (node_type or "concept").strip().lower()
+    if t in HALF_LIVES:
+        return t
+    return _TYPE_SYNONYMS.get(t, "concept")
+
+
 # Controlled edge-relation vocabulary. Every edge is normalized to one of these
 # (see normalize_relation), so extraction and synthesis stay consistent and the
 # graph never accumulates free-form labels like "relies on" / "is a key part of".
@@ -156,6 +177,7 @@ def now():
 # ── Nodes ──────────────────────────────────────────────────────────────────
 
 def add_node(conn, name, type_="concept", content="", source="", confidence=0.8, importance=0.5):
+    type_ = normalize_type(type_)  # keep node types on the controlled vocabulary
     half_life = HALF_LIVES.get(type_, 60.0)
     node_id = new_id()
     t = now()
