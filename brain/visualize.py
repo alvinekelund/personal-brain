@@ -149,7 +149,8 @@ const G = ForceGraph3D()(document.getElementById('g'))
                  + '<b>' + n.name + '</b> [' + n.type + ']<br>' + (n.desc||'') + '</div>')
   .nodeColor('color').nodeVal('val').nodeOpacity(0.92)
   .linkColor('color').linkWidth(l => l.po ? 1.5 : 0.5).linkOpacity(0.5)
-  .linkDirectionalArrowLength(l => l.po ? 3.5 : 0).linkDirectionalArrowRelPos(1);
+  .linkDirectionalArrowLength(l => l.po ? 3.5 : 0).linkDirectionalArrowRelPos(1)
+  .onNodeClick(n => { if (window.brainNodeClick) window.brainNodeClick(n.id); });
 </script></body></html>"""
 
 

@@ -48,6 +48,21 @@ def api_context(conn, topic):
     return {"doc": graph.synthesize_context(nodes, topic=topic), "n": len(nodes), "fallback": fb}
 
 
+def api_node(conn, node_id):
+    n = db.get_node(conn, node_id)
+    if not n:
+        return {"error": "not found"}
+    edges = []
+    for e in db.edges_for_node(conn, node_id):
+        other = db.get_node(conn, e["target_id"] if e["source_id"] == node_id else e["source_id"])
+        if other:
+            edges.append({"rel": e["relation"], "other": other["name"],
+                          "dir": "→" if e["source_id"] == node_id else "←"})
+    return {"name": n["name"], "type": n["type"], "content": n["content"] or "",
+            "importance": round(n["importance"], 2), "weight": round(n["weight"], 2),
+            "edges": edges}
+
+
 def api_status(conn):
     decay.run_decay(conn)
     return {"stats": db.stats(conn), "fading": decay.at_risk_nodes(conn),
@@ -132,6 +147,14 @@ async function bStatus(){const j=await (await fetch('/status')).json(),s=j.stats
  h+=(j.areas||[]).map(a=>'• '+esc(a[0])+' ('+a[1]+')').join('\\n')||'(none)';h+='\\n\\nFading soon:\\n';
  h+=(j.fading||[]).map(f=>'• ['+f.type+'] '+esc(f.name)+' w='+f.weight.toFixed(2)).join('\\n')||'(none)';show('Status',h);}
 async function bTree(){const t=await (await fetch('/tree')).text();show('Hierarchy',esc(t));}
+function showNode(j){ if(j.error){show('Node',j.error);return;}
+ let b='importance '+j.importance+' · weight '+j.weight+'<br><br>'+esc(j.content)+'<br><br><b>connections</b><br>';
+ b+=(j.edges||[]).map(e=>'• '+e.dir+' '+e.rel+' '+esc(e.other)).join('<br>')||'(none)';
+ show(esc(j.name)+' ['+j.type+']', b); }
+window.brainNodeClick=async id=>{ if(!id)return; showNode(await (await fetch('/node?id='+encodeURIComponent(id))).json()); };
+(function hook2D(){ if(typeof network!=='undefined' && network.on){
+   network.on('click',p=>{ if(p.nodes&&p.nodes[0]) window.brainNodeClick(p.nodes[0]); }); }
+ else setTimeout(hook2D,300); })();
 function setMin(v){const u=new URL(location);u.searchParams.set('min',v);location=u;}
 (function(){const u=new URL(location),m=u.searchParams.get('min');if(m){$('mw').value=m;$('mwv').textContent=m;}})();
 ['addin','qin','cin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext][k]();}));
@@ -178,6 +201,8 @@ def make_handler(interval: float):
                     self._json(api_status(conn))
                 elif u.path == "/tree":
                     self._send(api_tree(conn), "text/plain")
+                elif u.path == "/node":
+                    self._json(api_node(conn, qs.get("id", [""])[0]))
                 else:
                     try:
                         mw = float(qs.get("min", ["0"])[0])
