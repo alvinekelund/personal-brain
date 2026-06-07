@@ -98,6 +98,47 @@ def main():
     print(f"  ({'whole-brain' if fb else 'seeded'}, {len(nodes)} nodes)\n")
     print(graph.synthesize_context(nodes, topic="my studies"))
 
+    return checks(conn)
+
+
+def checks(conn):
+    """Structural invariants — deterministic given the code (robust to LLM variance)."""
+    print("\n" + "=" * 70, "\nCHECKS\n" + "=" * 70)
+    results = []
+
+    def check(name, ok):
+        results.append(ok)
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
+
+    root = db.get_node_by_name(conn, USER)
+    part_of = [e for e in db.all_edges(conn) if e["relation"] == "part_of"]
+
+    # 1. the person's direct children are all categories
+    direct = [e["source_id"] for e in part_of if e["target_id"] == root["id"]]
+    check("person's direct children are all categories",
+          all(db.get_node(conn, c)["type"] == "category" for c in direct))
+
+    # 2. every category is a direct child of the person (categories root at identity)
+    cat_ids = {n["id"] for n in db.all_nodes(conn) if n["type"] == "category"}
+    cat_parents = {e["source_id"]: e["target_id"] for e in part_of if e["source_id"] in cat_ids}
+    check("every category is rooted directly at the person",
+          all(cat_parents.get(cid) == root["id"] for cid in cat_ids))
+
+    # 3. every non-category, non-identity node has a part_of parent (nothing floats)
+    has_parent = {e["source_id"] for e in part_of}
+    floating = [n for n in db.all_nodes(conn)
+                if n["type"] != "category" and n["id"] != root["id"] and n["id"] not in has_parent]
+    check(f"no floating nodes (found {len(floating)})", not floating)
+
+    # 4. idempotency: re-ingesting identical content adds nothing
+    before = len(db.all_nodes(conn))
+    ingest(conn, CONTENT[0])
+    check("re-ingesting identical content is idempotent", len(db.all_nodes(conn)) == before)
+
+    ok = all(results)
+    print(f"\n{'ALL CHECKS PASSED' if ok else 'SOME CHECKS FAILED'}")
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

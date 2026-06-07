@@ -67,6 +67,14 @@ python -m unittest discover -s tests
 
 CI runs these on every push across Python 3.10–3.12.
 
+For an end-to-end check against live Gemini (ingests varied content into an
+isolated temp brain, prints the hierarchy/search/context, and asserts structural
+invariants), run:
+
+```bash
+python scripts/scenario.py
+```
+
 ---
 
 ## Usage
