@@ -327,6 +327,32 @@ class HierarchyTests(BrainTestCase):
         cid = db.add_node(self.conn, "Career", type_="category")
         self.assertEqual(db.get_node(self.conn, cid)["half_life_days"], float("inf"))
 
+    def test_person_only_has_category_children(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        # LLM (wrongly) attaches a friend and a concept straight to the person
+        extracted = {
+            "nodes": [
+                {"name": "Bjorn", "type": "person", "parent": "Alvin"},
+                {"name": "Chess", "type": "concept", "parent": "Alvin"},
+            ],
+            "edges": [],
+        }
+        extract.merge_into_db(self.conn, extracted, "src", "raw", user="Alvin")
+        alvin = db.get_node_by_name(self.conn, "Alvin")
+        # every direct child of the person must be a category
+        child_ids = [e["source_id"] for e in db.edges_for_node(self.conn, alvin["id"])
+                     if e["target_id"] == alvin["id"] and e["relation"] == "part_of"]
+        for cid in child_ids:
+            self.assertEqual(db.get_node(self.conn, cid)["type"], "category")
+        # Bjorn was re-routed under a category, not under the person
+        bjorn = db.get_node_by_name(self.conn, "Bjorn")
+        bjorn_parents = [db.get_node(self.conn, e["target_id"])
+                         for e in db.edges_for_node(self.conn, bjorn["id"])
+                         if e["source_id"] == bjorn["id"] and e["relation"] == "part_of"]
+        self.assertTrue(bjorn_parents)
+        self.assertTrue(all(p["type"] == "category" for p in bjorn_parents))
+        self.assertNotIn(alvin["id"], [p["id"] for p in bjorn_parents])
+
     def test_reuses_existing_category(self):
         db.ensure_identity_anchor(self.conn, "Alvin")
         cat = db.add_node(self.conn, "Hobbies", type_="category", importance=0.9)

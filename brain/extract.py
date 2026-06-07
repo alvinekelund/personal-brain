@@ -51,13 +51,16 @@ Rules:
   solving it are ONE node (keep the thing, e.g. "gradient explosion bug", and
   express the outcome via an edge or its content) — not "X" plus "fixing X".
 
-Hierarchy — organise everything into a shallow tree rooted at the person:
+Hierarchy — organise everything into a tree rooted at the person:
 - give every node a "parent": the broader node it belongs under.
-- broad life-area "category" nodes (Career, Hobbies, Health, ...) have the
-  person's name as their parent.
-- a specific thing's parent is its category or a more specific node
-  (e.g. parent of "Game on Sunday" is "Football"; parent of "Football" is "Hobbies").
-- REUSE existing categories when one fits; don't invent near-duplicates.
+- the person's ONLY direct children are broad "category" nodes (Career, Hobbies,
+  Relationships, Health, Education, ...). NEVER attach a person/concept/project/
+  task/etc. directly to the person — it must go under a category.
+  (e.g. a friend's parent is "Relationships" or "People", NOT the person.)
+- a specific thing's parent is its category or a more specific node under one
+  (parent of "Game on Sunday" is "Football"; parent of "Football" is "Hobbies").
+- REUSE existing categories when one fits; don't invent near-duplicates. Keep the
+  number of top-level categories small.
 - "parent" only sets the backbone; still add cross-links between nodes via edges
   (e.g. a friend relates_to a hobby) — the result is a tree plus cross-edges."""
 
@@ -174,14 +177,39 @@ def link_entities(new_nodes: list, existing_nodes: list) -> dict:
         return {}
 
 
-def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, user: str):
-    """Build the hierarchy spine: a `part_of` edge from each node to its parent.
+# type → fallback category, used when a node would otherwise hang off the person
+FALLBACK_CATEGORY = {
+    "person": "Relationships", "organization": "Organizations", "skill": "Skills",
+    "project": "Projects", "task": "Tasks", "event": "Events",
+    "artifact": "Artifacts", "fact": "Knowledge", "insight": "Insights",
+    "concept": "Knowledge",
+}
 
-    Unknown parents become `category` nodes (never-decay, high importance), and
-    any category left without a parent is rooted at the person's identity node.
+
+def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, user: str):
+    """Build the hierarchy spine and enforce that it's a real tree:
+
+    1. wire each node to its parent via `part_of` (unknown parents become categories);
+    2. enforce the person's only direct children are categories — re-route any
+       non-category node hanging directly off the person (or orphaned) under a
+       type-based fallback category;
+    3. root every category at the identity node.
     Returns (new_node_ids, new_edge_ids).
     """
     new_nodes, new_edges = [], []
+    identity = db.get_node_by_name(conn, user) if user else None
+
+    def ensure_category(name):
+        cat = db.get_node_by_name(conn, name)
+        if cat:
+            cid = cat["id"]
+        else:
+            cid = db.add_node(conn, name=name, type_="category", source=source, importance=0.85)
+            name_to_id[name] = cid
+            new_nodes.append(cid)
+        return cid
+
+    # 1. explicit parents
     for n in extracted.get("nodes", []):
         child = (n.get("name") or "").strip()
         parent = (n.get("parent") or "").strip()
@@ -193,29 +221,41 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
         parent_id = name_to_id.get(parent)
         if not parent_id:
             existing = db.get_node_by_name(conn, parent)
-            if existing:
-                parent_id = existing["id"]
-            else:  # emergent grouping → a category node
-                parent_id = db.add_node(conn, name=parent, type_="category",
-                                        source=source, importance=0.9)
-                name_to_id[parent] = parent_id
-                new_nodes.append(parent_id)
+            parent_id = existing["id"] if existing else ensure_category(parent)
         if parent_id and parent_id != child_id:
             new_edges.append(db.add_edge(conn, child_id, parent_id, "part_of"))
 
-    # root any orphan category at the identity node
-    identity = db.get_node_by_name(conn, user) if user else None
-    if identity:
-        for nid in set(name_to_id.values()):
-            node = db.get_node(conn, nid)
-            if not node or node["type"] != "category" or nid == identity["id"]:
-                continue
-            has_parent = any(
-                e["source_id"] == nid and e["relation"] == "part_of"
-                for e in db.edges_for_node(conn, nid)
-            )
-            if not has_parent:
-                new_edges.append(db.add_edge(conn, nid, identity["id"], "part_of"))
+    if not identity:
+        return new_nodes, new_edges
+
+    # 2. enforce person → categories only (re-route direct-to-person / orphan nodes)
+    for n in extracted.get("nodes", []):
+        nid = name_to_id.get((n.get("name") or "").strip())
+        if not nid:
+            continue
+        node = db.get_node(conn, nid)
+        if not node or node["type"] == "category" or nid == identity["id"]:
+            continue
+        part_edges = [e for e in db.edges_for_node(conn, nid)
+                      if e["source_id"] == nid and e["relation"] == "part_of"]
+        # the person cannot be a direct parent of a non-category node
+        for e in part_edges:
+            if e["target_id"] == identity["id"]:
+                db.delete_edge(conn, e["id"])
+        non_person_parents = [e for e in part_edges if e["target_id"] != identity["id"]]
+        if not non_person_parents:  # orphan or was only under the person → give it a category
+            cat_id = ensure_category(FALLBACK_CATEGORY.get(node["type"], "Misc"))
+            if cat_id != nid:
+                new_edges.append(db.add_edge(conn, nid, cat_id, "part_of"))
+
+    # 3. root every category at the identity
+    for nid in set(name_to_id.values()):
+        node = db.get_node(conn, nid)
+        if not node or node["type"] != "category" or nid == identity["id"]:
+            continue
+        if not any(e["source_id"] == nid and e["relation"] == "part_of"
+                   for e in db.edges_for_node(conn, nid)):
+            new_edges.append(db.add_edge(conn, nid, identity["id"], "part_of"))
     return new_nodes, new_edges
 
 

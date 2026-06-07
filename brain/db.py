@@ -340,6 +340,10 @@ def all_edges(conn):
     return conn.execute("SELECT * FROM edges").fetchall()
 
 
+def delete_edge(conn, edge_id):
+    conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+
+
 def merge_nodes(conn, keep_id, drop_id) -> bool:
     """Merge drop_id into keep_id: re-point drop's edges onto keep, then delete
     drop (its leftover edges cascade away). Self-loops are skipped and add_edge
