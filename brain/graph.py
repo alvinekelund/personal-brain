@@ -107,19 +107,24 @@ def synthesize_context(nodes: dict, topic: str = "") -> str:
     if not nodes:
         return "No relevant knowledge found."
 
-    # build a compact node dump grouped by type
+    def imp(n):
+        return n["importance"] if "importance" in n.keys() else 0.5
+
+    # build a compact node dump grouped by type, most-important first within each
     by_type: dict[str, list] = {}
     for n in nodes.values():
         by_type.setdefault(n["type"], []).append(n)
 
     sections = []
     for t, items in sorted(by_type.items()):
-        lines = [f"  - {i['name']} (w={i['weight']:.2f}): {i['content']}" for i in items]
+        items = sorted(items, key=lambda i: -imp(i))
+        lines = [f"  - {i['name']} (importance {imp(i):.2f}): {i['content']}" for i in items]
         sections.append(f"{t.upper()}S\n" + "\n".join(lines))
 
     node_dump = "\n\n".join(sections)
 
     prompt = f"""Here is a personal knowledge graph{' about "' + topic + '"' if topic else ''}.
+Each item has an importance (0-1): how central and lasting it is to the person.
 
 {node_dump}
 
@@ -130,7 +135,9 @@ Write a structured context document with sections:
 ## Projects
 ## Open Questions
 
-Be concise and synthesise — don't just list facts. Write as if briefing someone who needs to understand this person's knowledge state quickly."""
+Lead with the highest-importance items and weight them most; mention low-importance
+details only briefly or omit them. Be concise and synthesise — don't just list
+facts. Write as if briefing someone who needs to understand this person quickly."""
 
     return llm.generate(prompt).strip()
 

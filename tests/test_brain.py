@@ -710,6 +710,25 @@ class GraphTests(BrainTestCase):
         self.assertIn(hub, nodes)              # hub kept
         self.assertTrue(all(n not in nodes for n in noise))  # its other leaves pruned
 
+    def test_synthesize_context_is_importance_ordered(self):
+        nodes = {
+            "1": {"name": "Trivial detail", "type": "concept", "content": "x",
+                  "weight": 1.0, "importance": 0.1},
+            "2": {"name": "Crucial thing", "type": "concept", "content": "y",
+                  "weight": 1.0, "importance": 0.9},
+        }
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "DOC")[1]
+        try:
+            out = graph.synthesize_context(nodes, topic="t")
+        finally:
+            llm.generate = orig
+        self.assertEqual(out, "DOC")
+        p = captured["p"]
+        self.assertIn("importance", p)                       # importance surfaced
+        self.assertLess(p.index("Crucial thing"), p.index("Trivial detail"))  # important first
+
     def test_context_empty_brain(self):
         for n in db.all_nodes(self.conn):
             db.delete_node(self.conn, n["id"])
