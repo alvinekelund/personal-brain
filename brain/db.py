@@ -336,6 +336,20 @@ def log_ingestion(conn, raw_text, source, node_ids, edge_ids):
     )
 
 
+def clear(conn) -> dict:
+    """Delete ALL nodes, edges, and ingestion history. Returns counts removed."""
+    counts = {
+        "nodes": conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0],
+        "edges": conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0],
+        "log": conn.execute("SELECT COUNT(*) FROM ingestion_log").fetchone()[0],
+    }
+    conn.execute("DELETE FROM edges")
+    conn.execute("DELETE FROM nodes")
+    conn.execute("DELETE FROM ingestion_log")
+    conn.commit()
+    return counts
+
+
 # ── Stats ──────────────────────────────────────────────────────────────────
 
 def stats(conn):

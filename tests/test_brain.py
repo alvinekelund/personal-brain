@@ -110,6 +110,25 @@ class DecayTests(BrainTestCase):
         self.assertEqual(names, ["low", "mid"])  # lowest decaying first; person excluded
 
 
+class ClearTests(BrainTestCase):
+    def test_clear_empties_all_tables(self):
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        db.add_edge(self.conn, a, b, "relates_to")
+        db.log_ingestion(self.conn, "raw text", "src", [a, b], [])
+        self.conn.commit()
+        counts = db.clear(self.conn)
+        self.assertEqual(counts["nodes"], 2)
+        self.assertEqual(counts["edges"], 1)
+        self.assertEqual(counts["log"], 1)
+        self.assertEqual(db.all_nodes(self.conn, include_archived=True), [])
+        self.assertEqual(db.all_edges(self.conn), [])
+        self.assertEqual(db.stats(self.conn)["total"], 0)
+
+    def test_clear_on_empty_brain_is_safe(self):
+        self.assertEqual(db.clear(self.conn), {"nodes": 0, "edges": 0, "log": 0})
+
+
 class SearchTests(BrainTestCase):
     def setUp(self):
         super().setUp()

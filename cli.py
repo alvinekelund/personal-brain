@@ -226,6 +226,32 @@ def prune():
     click.echo(f"Pruned {len(rows)} archived node(s).")
 
 
+# ── clear ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
+def clear(yes):
+    """Erase the ENTIRE brain — all nodes, edges, and history (irreversible).
+
+    Tip: run `brain export backup.json` first if you might want it back.
+    """
+    conn = db.connect()
+    s = db.stats(conn)
+    if s["total"] == 0:
+        click.echo("Brain is already empty.")
+        return
+    if not yes:
+        click.confirm(
+            f"This permanently deletes {s['total']} node(s) and {s['edges']} edge(s). Continue?",
+            abort=True,
+        )
+    counts = db.clear(conn)
+    click.echo(
+        f"Cleared {counts['nodes']} node(s), {counts['edges']} edge(s), "
+        f"{counts['log']} log entr(ies)."
+    )
+
+
 # ── reindex ───────────────────────────────────────────────────────────────────
 
 @cli.command()

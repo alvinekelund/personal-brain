@@ -87,6 +87,7 @@ brain synthesize                 # find and surface new connections
 brain reindex                    # (re)compute embeddings for semantic search
 brain decay                      # run decay manually
 brain prune                      # delete archived nodes
+brain clear                      # erase the entire brain (asks to confirm; -y to skip)
 
 # Manual ops
 brain reinforce <node-id>        # boost weight to 1.0
