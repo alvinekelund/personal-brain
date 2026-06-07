@@ -104,6 +104,9 @@ _UI = """
   <button onclick="bTree()">Tree</button>
   <a href="?view=2d" style="color:#9aa;font-size:12px;align-self:center">2D</a>
   <a href="?view=3d" style="color:#9aa;font-size:12px;align-self:center">3D</a>
+  <label style="color:#9aa;font-size:12px;align-self:center">min w
+    <input type="range" id="mw" min="0" max="1" step="0.05" style="width:90px;vertical-align:middle" onchange="setMin(this.value)"/>
+    <span id="mwv">0</span></label>
   <span id="bxmsg"></span>
 </div>
 <div id="panel"><span class="close" onclick="document.getElementById('panel').style.display='none'">✕</span><div id="pc"></div></div>
@@ -129,15 +132,20 @@ async function bStatus(){const j=await (await fetch('/status')).json(),s=j.stats
  h+=(j.areas||[]).map(a=>'• '+esc(a[0])+' ('+a[1]+')').join('\\n')||'(none)';h+='\\n\\nFading soon:\\n';
  h+=(j.fading||[]).map(f=>'• ['+f.type+'] '+esc(f.name)+' w='+f.weight.toFixed(2)).join('\\n')||'(none)';show('Status',h);}
 async function bTree(){const t=await (await fetch('/tree')).text();show('Hierarchy',esc(t));}
+function setMin(v){const u=new URL(location);u.searchParams.set('min',v);location=u;}
+(function(){const u=new URL(location),m=u.searchParams.get('min');if(m){$('mw').value=m;$('mwv').textContent=m;}})();
 ['addin','qin','cin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext][k]();}));
 setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim();if(v&&v!==_V)location.reload();}catch(e){}},%(ms)d);
 </script>
 """
 
 
-def render_page(conn, interval: float, view: str = "2d") -> str:
+def render_page(conn, interval: float, view: str = "2d", min_weight: float = 0.0) -> str:
     decay.run_decay(conn)
-    html = visualize.build_html_3d(conn) if view == "3d" else visualize.build_html(conn)
+    if view == "3d":
+        html = visualize.build_html_3d(conn, min_weight=min_weight)
+    else:
+        html = visualize.build_html(conn, min_weight=min_weight)
     ui = _UI % {"fp": fingerprint(conn), "ms": int(interval * 1000)}
     return html.replace("</body>", ui + "</body>", 1) if "</body>" in html else html + ui
 
@@ -171,7 +179,11 @@ def make_handler(interval: float):
                 elif u.path == "/tree":
                     self._send(api_tree(conn), "text/plain")
                 else:
-                    self._send(render_page(conn, interval, qs.get("view", ["2d"])[0]))
+                    try:
+                        mw = float(qs.get("min", ["0"])[0])
+                    except ValueError:
+                        mw = 0.0
+                    self._send(render_page(conn, interval, qs.get("view", ["2d"])[0], mw))
             finally:
                 conn.close()
 

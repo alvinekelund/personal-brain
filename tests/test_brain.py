@@ -222,6 +222,16 @@ class Visualize3DTests(BrainTestCase):
         self.assertIn('"links"', html)
         self.assertNotIn("__DATA__", html)      # placeholder substituted
 
+    def test_build_html_3d_min_weight_filters(self):
+        import brain.visualize as visualize
+        hi = db.add_node(self.conn, "HiNode", type_="concept")
+        lo = db.add_node(self.conn, "LoNode", type_="concept")
+        self.conn.execute("UPDATE nodes SET weight=0.2 WHERE id=?", (lo,))
+        self.conn.commit()
+        html = visualize.build_html_3d(self.conn, min_weight=0.5)
+        self.assertIn("HiNode", html)
+        self.assertNotIn("LoNode", html)        # faded node filtered out
+
 
 class ServerApiTests(BrainTestCase):
     def test_api_status(self):
