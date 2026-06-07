@@ -69,36 +69,20 @@ def add(text, file_path, url, source):
     if user:
         db.ensure_identity_anchor(conn, user)
 
-    existing_nodes = db.all_nodes(conn)
-    existing_names = [n["name"] for n in existing_nodes]
-    categories = [n["name"] for n in existing_nodes if n["type"] == "category"]
-
     click.echo("Extracting knowledge...")
     try:
-        extracted = extract.extract(raw, source=source, existing_names=existing_names,
-                                    user=user, categories=categories)
+        node_ids, edge_ids = extract.ingest(conn, raw, source=source, user=user)
     except Exception as e:
         click.echo(f"Extraction failed: {e}", err=True)
         sys.exit(1)
 
-    new_nodes = extracted.get("nodes", [])
-    entity_links = extract.link_entities(new_nodes, existing_nodes)
-    if entity_links:
-        click.echo(f"  Linked: {entity_links}")
-
-    node_ids, edge_ids = extract.merge_into_db(
-        conn, extracted, source, raw, entity_links=entity_links, user=user
-    )
     click.echo(f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s).")
-
-    # best-effort: embed new nodes so semantic search works without manual reindex
-    extract.embed_nodes(conn, node_ids)
-
-    for n in new_nodes[:5]:
-        display = entity_links.get(n["name"], n["name"])
-        click.echo(f"  [{n.get('type', '?')}] {display}")
-    if len(new_nodes) > 5:
-        click.echo(f"  ... and {len(new_nodes) - 5} more")
+    for nid in node_ids[:6]:
+        n = db.get_node(conn, nid)
+        if n:
+            click.echo(f"  [{n['type']}] {n['name']}")
+    if len(node_ids) > 6:
+        click.echo(f"  ... and {len(node_ids) - 6} more")
 
 
 # ── show ──────────────────────────────────────────────────────────────────────

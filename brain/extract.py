@@ -406,6 +406,8 @@ def embed_nodes(conn, node_ids) -> int:
     """
     from brain import db
 
+    if not llm.have_key():
+        return 0
     done = 0
     for nid in node_ids:
         node = db.get_node(conn, nid)
@@ -419,3 +421,21 @@ def embed_nodes(conn, node_ids) -> int:
     if done:
         conn.commit()
     return done
+
+
+def ingest(conn, raw: str, source: str = "", user: str = ""):
+    """Full ingestion pipeline shared by `brain add` and the web view:
+    ensure identity → extract → entity-link → merge (with hierarchy) → embed.
+    Returns (node_ids, edge_ids)."""
+    from brain import db
+
+    if user:
+        db.ensure_identity_anchor(conn, user)
+    existing = db.all_nodes(conn)
+    categories = [n["name"] for n in existing if n["type"] == "category"]
+    ex = extract(raw, source=source, existing_names=[n["name"] for n in existing],
+                 user=user, categories=categories)
+    links = link_entities(ex.get("nodes", []), existing)
+    node_ids, edge_ids = merge_into_db(conn, ex, source, raw, entity_links=links, user=user)
+    embed_nodes(conn, node_ids)
+    return node_ids, edge_ids

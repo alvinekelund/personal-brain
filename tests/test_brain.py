@@ -178,7 +178,30 @@ class ServerTests(BrainTestCase):
         self.assertIn("GRAPH", html)
         self.assertIn("/version", html)            # polls for changes
         self.assertIn("location.reload", html)     # reloads on change
+        self.assertIn("brainAdd", html)            # in-page "talk to your brain" box
+        self.assertIn("/add", html)                # posts new content
         self.assertTrue(html.endswith("</body></html>") or "</body>" in html)
+
+
+class IngestTests(BrainTestCase):
+    def test_ingest_runs_full_pipeline_under_a_category(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        responses = iter([
+            '{"nodes":[{"name":"Piano","type":"skill","parent":"Hobbies","importance":0.6}],"edges":[]}',
+            '{}',  # link_entities
+        ])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            nids, _ = extract.ingest(self.conn, "I started learning piano", source="web", user="Alvin")
+        finally:
+            llm.generate = orig
+        self.assertTrue(nids)
+        piano = db.get_node_by_name(self.conn, "Piano")
+        self.assertIsNotNone(piano)
+        parents = [e for e in db.edges_for_node(self.conn, piano["id"])
+                   if e["source_id"] == piano["id"] and e["relation"] == "part_of"]
+        self.assertTrue(parents)  # placed under a category, not floating
 
 
 class ClearTests(BrainTestCase):
@@ -712,12 +735,13 @@ class SemanticSearchTests(BrainTestCase):
         a = db.add_node(self.conn, "rust", type_="concept", content="systems lang")
         b = db.add_node(self.conn, "go", type_="concept", content="another lang")
         self.conn.commit()
-        orig = llm.embed
+        orig_embed, orig_key = llm.embed, llm.have_key
         llm.embed = lambda text, *a, **k: [1.0, 0.0] if "rust" in text.lower() else [0.0, 1.0]
+        llm.have_key = lambda: True
         try:
             n = extract.embed_nodes(self.conn, [a, b])
         finally:
-            llm.embed = orig
+            llm.embed, llm.have_key = orig_embed, orig_key
         self.assertEqual(n, 2)
         top = graph.semantic_search(self.conn, [1.0, 0.0], limit=1)
         self.assertEqual(top[0][1]["name"], "rust")
@@ -731,12 +755,13 @@ class SemanticSearchTests(BrainTestCase):
         def boom(*a, **k):
             raise RuntimeError("API down")
 
-        orig = llm.embed
+        orig_embed, orig_key = llm.embed, llm.have_key
         llm.embed = boom
+        llm.have_key = lambda: True
         try:
             n = extract.embed_nodes(self.conn, [a, b])  # a skipped, b errors -> swallowed
         finally:
-            llm.embed = orig
+            llm.embed, llm.have_key = orig_embed, orig_key
         self.assertEqual(n, 0)  # nothing newly embedded, no exception raised
 
 
