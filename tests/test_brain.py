@@ -288,6 +288,39 @@ class HierarchyTests(BrainTestCase):
         self.assertIn(hobbies["id"], self._parents_of(football["id"]))
         self.assertIn(alvin["id"], self._parents_of(hobbies["id"]))
 
+    def test_touch_propagates_up_spine(self):
+        cat = db.add_node(self.conn, "Hobbies", type_="category", importance=0.9)
+        topic = db.add_node(self.conn, "Football", type_="concept")
+        detail = db.add_node(self.conn, "Game Sunday", type_="event")
+        db.add_edge(self.conn, topic, cat, "part_of")
+        db.add_edge(self.conn, detail, topic, "part_of")
+        # let the ancestors decay a bit
+        self.conn.execute("UPDATE nodes SET weight=0.2 WHERE id IN (?,?)", (cat, topic))
+        self.conn.commit()
+        db.touch_node(self.conn, detail)  # touching the leaf
+        # parent (depth1) boosted to >= 0.6, grandparent (depth2) to >= 0.36
+        self.assertGreaterEqual(db.get_node(self.conn, topic)["weight"], 0.6 - 1e-9)
+        self.assertGreaterEqual(db.get_node(self.conn, cat)["weight"], 0.36 - 1e-9)
+
+    def test_touch_no_spine_is_noop_for_others(self):
+        a = db.add_node(self.conn, "Lonely", type_="concept")
+        b = db.add_node(self.conn, "Other", type_="concept")
+        self.conn.execute("UPDATE nodes SET weight=0.3 WHERE id=?", (b,))
+        self.conn.commit()
+        db.touch_node(self.conn, a)  # a has no parents
+        self.assertEqual(db.get_node(self.conn, b)["weight"], 0.3)  # unrelated untouched
+
+    def test_children_map(self):
+        cat = db.add_node(self.conn, "Cat", type_="category")
+        c1 = db.add_node(self.conn, "C1", type_="concept")
+        c2 = db.add_node(self.conn, "C2", type_="concept")
+        db.add_edge(self.conn, c1, cat, "part_of")
+        db.add_edge(self.conn, c2, cat, "part_of")
+        db.add_edge(self.conn, c1, c2, "relates_to")  # non-hierarchy edge ignored
+        self.conn.commit()
+        m = graph.children_map(self.conn)
+        self.assertEqual(set(m[cat]), {c1, c2})
+
     def test_category_never_decays(self):
         from brain import db as _db
         self.assertEqual(_db.HALF_LIVES["category"], float("inf"))

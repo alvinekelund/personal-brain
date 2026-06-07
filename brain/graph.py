@@ -119,6 +119,15 @@ Be concise and synthesise — don't just list facts. Write as if briefing someon
     return llm.generate(prompt).strip()
 
 
+def children_map(conn) -> dict:
+    """Return {parent_id: [child_ids]} from the part_of hierarchy edges."""
+    m: dict = {}
+    for e in db.all_edges(conn):
+        if e["relation"] == "part_of":
+            m.setdefault(e["target_id"], []).append(e["source_id"])
+    return m
+
+
 def cosine(a: list, b: list) -> float:
     """Cosine similarity between two vectors; 0.0 if either is empty/zero."""
     if not a or not b or len(a) != len(b):

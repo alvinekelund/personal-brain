@@ -187,13 +187,42 @@ def all_nodes(conn, include_archived=False, min_weight=0.0):
     return conn.execute(q, params).fetchall()
 
 
+PROPAGATION_DECAY = 0.6      # boost given to a parent, falling off per level
+PROPAGATION_MAX_DEPTH = 3    # how far up the spine a touch reaches
+
+
+def _reinforce_ancestors(conn, node_id, depth=1, seen=None):
+    """Walk up the part_of spine, giving each ancestor a diminishing freshness
+    boost — so using a child keeps its category/topic ancestors alive too."""
+    if depth > PROPAGATION_MAX_DEPTH:
+        return
+    seen = seen if seen is not None else set()
+    parents = conn.execute(
+        "SELECT target_id FROM edges WHERE source_id = ? AND relation = 'part_of'",
+        (node_id,),
+    ).fetchall()
+    boost = PROPAGATION_DECAY ** depth
+    for p in parents:
+        pid = p["target_id"]
+        if pid in seen:
+            continue
+        seen.add(pid)
+        conn.execute(
+            "UPDATE nodes SET last_accessed = ?, weight = max(weight, ?) WHERE id = ?",
+            (now(), boost, pid),
+        )
+        _reinforce_ancestors(conn, pid, depth + 1, seen)
+
+
 def touch_node(conn, node_id):
-    """Mark as accessed — resets decay."""
+    """Mark as accessed — resets decay and propagates a freshness boost up the
+    part_of hierarchy so ancestors (topic, category) stay alive too."""
     conn.execute(
         """UPDATE nodes SET last_accessed = ?, access_count = access_count + 1,
            weight = 1.0 WHERE id = ?""",
         (now(), node_id),
     )
+    _reinforce_ancestors(conn, node_id)
 
 
 def set_embedding(conn, node_id, vector):

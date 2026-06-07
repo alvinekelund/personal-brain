@@ -179,6 +179,43 @@ def context(topic, depth, min_weight):
     click.echo(doc)
 
 
+# ── tree ──────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--min-weight", default=0.0, show_default=True)
+def tree(min_weight):
+    """Print the brain as a hierarchy rooted at you."""
+    conn = db.connect()
+    _run_decay(conn)
+    kids = graph.children_map(conn)
+    seen = set()
+
+    def render(nid, depth):
+        if nid in seen:
+            return
+        seen.add(nid)
+        n = db.get_node(conn, nid)
+        if not n or n["archived"] or n["weight"] < min_weight:
+            return
+        click.echo("  " * depth + f"- {n['name']} [{n['type']}] w={n['weight']:.2f} imp={n['importance']:.2f}")
+        for child in sorted(kids.get(nid, []),
+                            key=lambda c: -((db.get_node(conn, c) or {"weight": 0})["weight"])):
+            render(child, depth + 1)
+
+    # roots = identity node first, then anything with no parent
+    has_parent = {e["source_id"] for e in db.all_edges(conn) if e["relation"] == "part_of"}
+    user = config.get_user()
+    roots = []
+    if user:
+        ident = db.get_node_by_name(conn, user)
+        if ident:
+            roots.append(ident["id"])
+    roots += [n["id"] for n in db.all_nodes(conn)
+              if n["id"] not in has_parent and n["id"] not in roots]
+    for r in roots:
+        render(r, 0)
+
+
 # ── status ────────────────────────────────────────────────────────────────────
 
 @cli.command()
