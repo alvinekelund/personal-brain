@@ -17,6 +17,7 @@ HALF_LIVES = {
     "project":      365.0,
     "person":       float("inf"),
     "organization": float("inf"),  # institutions don't expire
+    "category":     float("inf"),  # structural hierarchy nodes never decay
 }
 
 # Controlled edge-relation vocabulary. Every edge is normalized to one of these

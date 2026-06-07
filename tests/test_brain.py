@@ -261,6 +261,54 @@ class MergeNodesTests(BrainTestCase):
         self.assertFalse(db.merge_nodes(self.conn, a, a))            # same id is a no-op
 
 
+class HierarchyTests(BrainTestCase):
+    def _parents_of(self, node_id):
+        return {e["target_id"] for e in db.edges_for_node(self.conn, node_id)
+                if e["source_id"] == node_id and e["relation"] == "part_of"}
+
+    def test_builds_person_rooted_spine(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        extracted = {
+            "nodes": [
+                {"name": "Football", "type": "concept", "parent": "Hobbies"},
+                {"name": "Game on Sunday", "type": "event", "parent": "Football"},
+            ],
+            "edges": [],
+        }
+        extract.merge_into_db(self.conn, extracted, "src", "raw", user="Alvin")
+        alvin = db.get_node_by_name(self.conn, "Alvin")
+        hobbies = db.get_node_by_name(self.conn, "Hobbies")
+        football = db.get_node_by_name(self.conn, "Football")
+        sunday = db.get_node_by_name(self.conn, "Game on Sunday")
+        # emergent grouping became a category node
+        self.assertIsNotNone(hobbies)
+        self.assertEqual(hobbies["type"], "category")
+        # spine: Sunday -> Football -> Hobbies -> Alvin
+        self.assertIn(football["id"], self._parents_of(sunday["id"]))
+        self.assertIn(hobbies["id"], self._parents_of(football["id"]))
+        self.assertIn(alvin["id"], self._parents_of(hobbies["id"]))
+
+    def test_category_never_decays(self):
+        from brain import db as _db
+        self.assertEqual(_db.HALF_LIVES["category"], float("inf"))
+        cid = db.add_node(self.conn, "Career", type_="category")
+        self.assertEqual(db.get_node(self.conn, cid)["half_life_days"], float("inf"))
+
+    def test_reuses_existing_category(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        cat = db.add_node(self.conn, "Hobbies", type_="category", importance=0.9)
+        self.conn.commit()
+        before = len(db.all_nodes(self.conn))
+        extract.merge_into_db(self.conn, {
+            "nodes": [{"name": "Chess", "type": "concept", "parent": "Hobbies"}],
+            "edges": [],
+        }, "src", "raw", user="Alvin")
+        # only "Chess" is new; "Hobbies" reused, not duplicated
+        self.assertEqual(len([n for n in db.all_nodes(self.conn) if n["name"] == "Hobbies"]), 1)
+        chess = db.get_node_by_name(self.conn, "Chess")
+        self.assertIn(cat, self._parents_of(chess["id"]))
+
+
 class GraphTests(BrainTestCase):
     def setUp(self):
         super().setUp()

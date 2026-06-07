@@ -5,7 +5,7 @@ SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
 {
   "nodes": [
-    {"name": "...", "type": "...", "content": "...", "confidence": 0.0-1.0, "importance": 0.0-1.0}
+    {"name": "...", "type": "...", "content": "...", "confidence": 0.0-1.0, "importance": 0.0-1.0, "parent": "..."}
   ],
   "edges": [
     {"source": "...", "target": "...", "relation": "..."}
@@ -13,6 +13,8 @@ Return ONLY valid JSON with this exact shape:
 }
 
 Node types — pick the most specific one that fits:
+  category     — a broad life-area grouping (e.g. "Career", "Hobbies",
+                 "Relationships", "Health", "Education") used to organise the tree
   person       — a human being
   organization — a company, university, institution, team
   concept      — an abstract idea, theory, or domain of knowledge
@@ -47,7 +49,17 @@ Rules:
   the concept learned, skill practised, or project advanced — not as its own node.
 - never emit two nodes for the same underlying thing. A problem and the act of
   solving it are ONE node (keep the thing, e.g. "gradient explosion bug", and
-  express the outcome via an edge or its content) — not "X" plus "fixing X"."""
+  express the outcome via an edge or its content) — not "X" plus "fixing X".
+
+Hierarchy — organise everything into a shallow tree rooted at the person:
+- give every node a "parent": the broader node it belongs under.
+- broad life-area "category" nodes (Career, Hobbies, Health, ...) have the
+  person's name as their parent.
+- a specific thing's parent is its category or a more specific node
+  (e.g. parent of "Game on Sunday" is "Football"; parent of "Football" is "Hobbies").
+- REUSE existing categories when one fits; don't invent near-duplicates.
+- "parent" only sets the backbone; still add cross-links between nodes via edges
+  (e.g. a friend relates_to a hobby) — the result is a tree plus cross-edges."""
 
 
 def _parse_json(raw: str) -> dict:
@@ -85,7 +97,8 @@ def _chunk_text(text: str, size: int = MAX_CHUNK) -> list[str]:
     return [c for c in chunks if c]
 
 
-def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
+def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None = None,
+                   user: str = "", categories: list[str] | None = None) -> dict:
     """Call Gemini once on a single (already size-bounded) chunk of text."""
     prompt = f"Extract knowledge from this text:\n\n{text[:MAX_CHUNK]}"
     if source:
@@ -94,7 +107,13 @@ def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None
         prompt += (
             f"\n\nIMPORTANT: The person whose brain this is, and the author of all "
             f"first-person statements ('I', 'me', 'my', 'the user', 'the speaker'), is: {user}. "
-            f"Always use the name '{user}' for this person — never 'User', 'Speaker', 'Me', etc."
+            f"Always use the name '{user}' for this person — never 'User', 'Speaker', 'Me', etc. "
+            f"Top-level category nodes should have '{user}' as their parent."
+        )
+    if categories:
+        prompt += (
+            "\n\nExisting categories — REUSE one of these as a node's parent when it "
+            "fits, instead of inventing a near-duplicate:\n" + ", ".join(categories[:40])
         )
     if existing_names:
         prompt += (
@@ -107,19 +126,20 @@ def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None
     return result if isinstance(result, dict) else {"nodes": [], "edges": []}
 
 
-def extract(text: str, source: str = "", existing_names: list[str] | None = None, user: str = "") -> dict:
+def extract(text: str, source: str = "", existing_names: list[str] | None = None,
+            user: str = "", categories: list[str] | None = None) -> dict:
     """Extract nodes/edges from text. Long input is chunked and merged so nothing
     past the model's input window is dropped."""
     chunks = _chunk_text(text)
     if not chunks:
         return {"nodes": [], "edges": []}
     if len(chunks) == 1:
-        return _extract_chunk(chunks[0], source, existing_names, user)
+        return _extract_chunk(chunks[0], source, existing_names, user, categories)
 
     merged: dict = {"nodes": [], "edges": []}
     seen: set[str] = set()
     for chunk in chunks:
-        part = _extract_chunk(chunk, source, existing_names, user)
+        part = _extract_chunk(chunk, source, existing_names, user, categories)
         for n in part.get("nodes", []):
             key = (n.get("name") or "").strip().lower()
             if key and key not in seen:
@@ -154,7 +174,53 @@ def link_entities(new_nodes: list, existing_nodes: list) -> dict:
         return {}
 
 
-def merge_into_db(conn, extracted: dict, source: str, raw_text: str, entity_links: dict | None = None):
+def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, user: str):
+    """Build the hierarchy spine: a `part_of` edge from each node to its parent.
+
+    Unknown parents become `category` nodes (never-decay, high importance), and
+    any category left without a parent is rooted at the person's identity node.
+    Returns (new_node_ids, new_edge_ids).
+    """
+    new_nodes, new_edges = [], []
+    for n in extracted.get("nodes", []):
+        child = (n.get("name") or "").strip()
+        parent = (n.get("parent") or "").strip()
+        if not child or not parent or parent.lower() == child.lower():
+            continue
+        child_id = name_to_id.get(child)
+        if not child_id:
+            continue
+        parent_id = name_to_id.get(parent)
+        if not parent_id:
+            existing = db.get_node_by_name(conn, parent)
+            if existing:
+                parent_id = existing["id"]
+            else:  # emergent grouping → a category node
+                parent_id = db.add_node(conn, name=parent, type_="category",
+                                        source=source, importance=0.9)
+                name_to_id[parent] = parent_id
+                new_nodes.append(parent_id)
+        if parent_id and parent_id != child_id:
+            new_edges.append(db.add_edge(conn, child_id, parent_id, "part_of"))
+
+    # root any orphan category at the identity node
+    identity = db.get_node_by_name(conn, user) if user else None
+    if identity:
+        for nid in set(name_to_id.values()):
+            node = db.get_node(conn, nid)
+            if not node or node["type"] != "category" or nid == identity["id"]:
+                continue
+            has_parent = any(
+                e["source_id"] == nid and e["relation"] == "part_of"
+                for e in db.edges_for_node(conn, nid)
+            )
+            if not has_parent:
+                new_edges.append(db.add_edge(conn, nid, identity["id"], "part_of"))
+    return new_nodes, new_edges
+
+
+def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
+                  entity_links: dict | None = None, user: str = ""):
     """Write extracted nodes/edges into the DB, deduplicating by name and entity links."""
     from brain import db
 
@@ -196,6 +262,11 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str, entity_link
         if src_id and tgt_id and src_id != tgt_id:
             eid = db.add_edge(conn, src_id, tgt_id, e.get("relation", "relates_to"))
             edge_ids.append(eid)
+
+    # hierarchy spine (parent → part_of edges, emergent category nodes, root at user)
+    h_nodes, h_edges = _attach_parents(conn, db, extracted, name_to_id, source, user)
+    node_ids.extend(h_nodes)
+    edge_ids.extend(h_edges)
 
     conn.commit()
     db.log_ingestion(conn, raw_text, source, node_ids, edge_ids)

@@ -4,6 +4,7 @@ import tempfile
 from brain import db
 
 TYPE_COLORS = {
+    "category":     "#F5F5F5",
     "concept":      "#4A90D9",
     "skill":        "#27AE60",
     "project":      "#E67E22",

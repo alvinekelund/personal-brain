@@ -71,10 +71,12 @@ def add(text, file_path, url, source):
 
     existing_nodes = db.all_nodes(conn)
     existing_names = [n["name"] for n in existing_nodes]
+    categories = [n["name"] for n in existing_nodes if n["type"] == "category"]
 
     click.echo("Extracting knowledge...")
     try:
-        extracted = extract.extract(raw, source=source, existing_names=existing_names, user=user)
+        extracted = extract.extract(raw, source=source, existing_names=existing_names,
+                                    user=user, categories=categories)
     except Exception as e:
         click.echo(f"Extraction failed: {e}", err=True)
         sys.exit(1)
@@ -84,7 +86,9 @@ def add(text, file_path, url, source):
     if entity_links:
         click.echo(f"  Linked: {entity_links}")
 
-    node_ids, edge_ids = extract.merge_into_db(conn, extracted, source, raw, entity_links=entity_links)
+    node_ids, edge_ids = extract.merge_into_db(
+        conn, extracted, source, raw, entity_links=entity_links, user=user
+    )
     click.echo(f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s).")
 
     # best-effort: embed new nodes so semantic search works without manual reindex
