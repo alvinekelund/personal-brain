@@ -9,39 +9,44 @@ IMPORTANCE_FLOOR = 0.15      # weight never drops below importance * this
 
 
 def days_until_archive(weight: float, half_life_days: float,
-                       threshold: float = ARCHIVE_THRESHOLD) -> float:
-    """Days until an untouched node decays from `weight` to the archive threshold.
+                       threshold: float = ARCHIVE_THRESHOLD, importance: float = 0.0) -> float:
+    """Days until an untouched node decays to the archive threshold.
 
-    Solves w * 0.5**(d/H) = threshold for d. inf for never-decaying types.
+    Importance-aware: it stretches the effective half-life and floors the weight
+    exactly like current_weight, so a floored (important) node returns inf —
+    matching what decay will actually do. inf for never-decaying types.
     """
     if math.isinf(half_life_days):
         return float("inf")
+    if importance * IMPORTANCE_FLOOR >= threshold:
+        return float("inf")  # floored above threshold → never archives
     if weight <= threshold:
         return 0.0
-    return half_life_days * math.log2(weight / threshold)
+    effective_hl = half_life_days * (1 + IMPORTANCE_GAIN * importance)
+    return effective_hl * math.log2(weight / threshold)
 
 
 def at_risk_nodes(conn, limit: int = 5, threshold: float = ARCHIVE_THRESHOLD) -> list:
-    """Active, decaying nodes closest to being archived (lowest weight first).
+    """Active, decaying nodes closest to being archived (soonest first).
 
-    Returns dicts with name/type/weight and an estimated days_left until archive,
-    so `brain status` can show what's about to be forgotten. Never-decaying types
-    (person/organization) are excluded — they're not at risk.
+    Returns dicts with name/type/weight and an importance-aware days_left, so
+    `brain status` shows what's about to be forgotten. Never-decaying types and
+    importance-floored nodes (which won't archive) are excluded.
     """
     rows = conn.execute(
-        "SELECT * FROM nodes WHERE archived=0 AND weight >= ? AND half_life_days < 1e12 "
-        "ORDER BY weight ASC LIMIT ?",
-        (threshold, limit),
+        "SELECT * FROM nodes WHERE archived=0 AND weight >= ? AND half_life_days < 1e12",
+        (threshold,),
     ).fetchall()
-    return [
-        {
-            "name": r["name"],
-            "type": r["type"],
-            "weight": r["weight"],
-            "days_left": days_until_archive(r["weight"], r["half_life_days"], threshold),
-        }
-        for r in rows
-    ]
+    cands = []
+    for r in rows:
+        imp = r["importance"] if "importance" in r.keys() else 0.0
+        days = days_until_archive(r["weight"], r["half_life_days"], threshold, imp)
+        if math.isinf(days):
+            continue  # floored/important → not at risk
+        cands.append({"name": r["name"], "type": r["type"], "weight": r["weight"],
+                      "days_left": days})
+    cands.sort(key=lambda x: x["days_left"])
+    return cands[:limit]
 
 
 def current_weight(weight: float, last_accessed: float, half_life_days: float,
