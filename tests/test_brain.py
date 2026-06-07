@@ -668,6 +668,21 @@ class GraphTests(BrainTestCase):
         self.assertIn(self.a, nodes)
         self.assertNotIn(self.c, nodes)    # football excluded (below similarity floor)
 
+    def test_category_breakdown(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        root = db.get_node_by_name(self.conn, "Alvin")["id"]
+        edu = db.add_node(self.conn, "Education", type_="category")
+        hob = db.add_node(self.conn, "Hobbies", type_="category")
+        db.add_edge(self.conn, edu, root, "part_of")
+        db.add_edge(self.conn, hob, root, "part_of")
+        for i in range(3):
+            db.add_edge(self.conn, db.add_node(self.conn, f"e{i}", type_="concept"), edu, "part_of")
+        db.add_edge(self.conn, db.add_node(self.conn, "f0", type_="concept"), hob, "part_of")
+        self.conn.commit()
+        bd = graph.category_breakdown(self.conn, "Alvin")
+        self.assertEqual(bd[0], ("Education", 3))   # largest first, descendant count
+        self.assertEqual(bd[1], ("Hobbies", 1))
+
     def test_hub_cap_floor_and_scaling(self):
         # sparse graph -> floor
         self.assertEqual(graph.hub_cap(self.conn, floor=5), 5)

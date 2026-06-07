@@ -144,6 +144,28 @@ def children_map(conn) -> dict:
     return m
 
 
+def category_breakdown(conn, user: str = "") -> list:
+    """Return [(category_name, descendant_count)] for top-level life-area
+    categories (direct children of the person), largest first."""
+    identity = db.get_node_by_name(conn, user) if user else None
+    kids = children_map(conn)
+
+    def subtree(nid, seen):
+        seen.add(nid)
+        return 1 + sum(subtree(c, seen) for c in kids.get(nid, []) if c not in seen)
+
+    result = []
+    for n in db.all_nodes(conn):
+        if n["type"] != "category":
+            continue
+        parents = [e["target_id"] for e in db.edges_for_node(conn, n["id"])
+                   if e["source_id"] == n["id"] and e["relation"] == "part_of"]
+        top_level = (identity and identity["id"] in parents) or not parents
+        if top_level:
+            result.append((n["name"], subtree(n["id"], set()) - 1))
+    return sorted(result, key=lambda x: -x[1])
+
+
 def cosine(a: list, b: list) -> float:
     """Cosine similarity between two vectors; 0.0 if either is empty/zero."""
     if not a or not b or len(a) != len(b):

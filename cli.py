@@ -246,6 +246,9 @@ def status():
     click.echo(f"Edges:    {s['edges']}")
     click.echo(f"Avg weight: {s['avg_weight']}")
     click.echo(f"By type:  {s['by_type']}")
+    breakdown = graph.category_breakdown(conn, config.get_user())
+    if breakdown:
+        click.echo("By area:  " + ", ".join(f"{name} ({n})" for name, n in breakdown))
     if any(result.values()):
         click.echo(
             f"Decay:    nodes updated={result['updated']} archived={result['archived']} "

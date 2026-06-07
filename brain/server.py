@@ -50,7 +50,8 @@ def api_context(conn, topic):
 
 def api_status(conn):
     decay.run_decay(conn)
-    return {"stats": db.stats(conn), "fading": decay.at_risk_nodes(conn)}
+    return {"stats": db.stats(conn), "fading": decay.at_risk_nodes(conn),
+            "areas": graph.category_breakdown(conn, config.get_user())}
 
 
 def api_tree(conn, user=None):
@@ -124,7 +125,8 @@ async function bSynth(){show('Synthesize','working…');const j=await (await fet
 async function bReorg(){show('Reorganize','working…');const j=await (await fetch('/reorganize',{method:'POST'})).json();
  show('Reorganize',(j.edges||0)+' hierarchy edges, '+(j.rescored||0)+' importance updates');setTimeout(()=>location.reload(),700);}
 async function bStatus(){const j=await (await fetch('/status')).json(),s=j.stats;
- let h='nodes: '+s.active+' active / '+s.total+' total\\nedges: '+s.edges+'\\navg weight: '+s.avg_weight+'\\nby type: '+esc(JSON.stringify(s.by_type))+'\\n\\nFading soon:\\n';
+ let h='nodes: '+s.active+' active / '+s.total+' total\\nedges: '+s.edges+'\\navg weight: '+s.avg_weight+'\\nby type: '+esc(JSON.stringify(s.by_type))+'\\n\\nBy area:\\n';
+ h+=(j.areas||[]).map(a=>'• '+esc(a[0])+' ('+a[1]+')').join('\\n')||'(none)';h+='\\n\\nFading soon:\\n';
  h+=(j.fading||[]).map(f=>'• ['+f.type+'] '+esc(f.name)+' w='+f.weight.toFixed(2)).join('\\n')||'(none)';show('Status',h);}
 async function bTree(){const t=await (await fetch('/tree')).text();show('Hierarchy',esc(t));}
 ['addin','qin','cin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext][k]();}));
