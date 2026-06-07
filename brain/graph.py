@@ -1,4 +1,6 @@
 """Graph traversal and context synthesis."""
+import json
+import math
 from collections import deque
 from brain import db, llm
 
@@ -115,6 +117,36 @@ Write a structured context document with sections:
 Be concise and synthesise — don't just list facts. Write as if briefing someone who needs to understand this person's knowledge state quickly."""
 
     return llm.generate(prompt).strip()
+
+
+def cosine(a: list, b: list) -> float:
+    """Cosine similarity between two vectors; 0.0 if either is empty/zero."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def semantic_search(conn, query_vector: list, min_weight: float = 0.0, limit: int = 10) -> list:
+    """Rank embedded nodes by cosine similarity to query_vector.
+
+    Returns [(score, node_row), ...] highest-first. Nodes without an embedding
+    are skipped (run `brain reindex` to embed them).
+    """
+    scored = []
+    for r in db.all_nodes(conn, min_weight=min_weight):
+        emb = r["embedding"] if "embedding" in r.keys() else None
+        if not emb:
+            continue
+        try:
+            vec = json.loads(emb)
+        except (TypeError, ValueError):
+            continue
+        scored.append((cosine(query_vector, vec), r))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[:limit]
 
 
 def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:

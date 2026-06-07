@@ -114,10 +114,24 @@ def show(min_weight, type_filter, color_by):
 @click.argument("query")
 @click.option("--min-weight", default=0.0, show_default=True)
 @click.option("--limit", default=10, show_default=True)
-def query(query, min_weight, limit):
-    """Search for nodes matching a query."""
+@click.option("--semantic", is_flag=True, help="Rank by meaning (embeddings) instead of keywords.")
+def query(query, min_weight, limit, semantic):
+    """Search for nodes matching a query (keyword by default; --semantic for meaning)."""
     conn = db.connect()
     _run_decay(conn)
+
+    if semantic:
+        from brain import llm
+        scored = graph.semantic_search(conn, llm.embed(query), min_weight=min_weight, limit=limit)
+        if not scored:
+            click.echo("No embedded nodes yet — run `brain reindex` first.")
+            return
+        for score, r in scored:
+            db.touch_node(conn, r["id"])
+            click.echo(f"[{r['type']:8s}] {r['name']:30s}  sim={score:.3f}  {r['content'][:55]}")
+        conn.commit()
+        return
+
     results = graph.query_nodes(conn, query, min_weight=min_weight)[:limit]
     if not results:
         click.echo("No results.")
@@ -207,6 +221,27 @@ def prune():
         db.delete_node(conn, r["id"])
     conn.commit()
     click.echo(f"Pruned {len(rows)} archived node(s).")
+
+
+# ── reindex ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+def reindex():
+    """Compute embeddings for all active nodes (enables `query --semantic`)."""
+    from brain import llm
+    conn = db.connect()
+    nodes = db.all_nodes(conn)
+    done = 0
+    with click.progressbar(nodes, label="Embedding nodes") as bar:
+        for node in bar:
+            try:
+                vec = llm.embed(f"{node['name']}. {node['content'] or ''}")
+                db.set_embedding(conn, node["id"], vec)
+                done += 1
+            except Exception as e:
+                click.echo(f"  skipped {node['name']}: {e}", err=True)
+    conn.commit()
+    click.echo(f"Reindexed {done}/{len(nodes)} node(s).")
 
 
 # ── synthesize ────────────────────────────────────────────────────────────────

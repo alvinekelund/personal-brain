@@ -422,6 +422,40 @@ class ChunkingTests(BrainTestCase):
         self.assertEqual(names.count("Shared"), 1)  # deduped across chunks
 
 
+class SemanticSearchTests(BrainTestCase):
+    def test_cosine(self):
+        self.assertAlmostEqual(graph.cosine([1, 0], [1, 0]), 1.0)
+        self.assertAlmostEqual(graph.cosine([1, 0], [0, 1]), 0.0)
+        self.assertAlmostEqual(graph.cosine([1, 0], [-1, 0]), -1.0)
+        self.assertEqual(graph.cosine([], [1, 2]), 0.0)
+        self.assertEqual(graph.cosine([1, 2], [1, 2, 3]), 0.0)  # mismatched dims
+
+    def test_set_embedding_roundtrip(self):
+        nid = db.add_node(self.conn, "X", type_="concept")
+        db.set_embedding(self.conn, nid, [0.1, 0.2, 0.3])
+        self.conn.commit()
+        import json as _json
+        self.assertEqual(_json.loads(db.get_node(self.conn, nid)["embedding"]), [0.1, 0.2, 0.3])
+
+    def test_semantic_search_ranks_by_similarity(self):
+        near = db.add_node(self.conn, "neural networks", type_="concept")
+        mid = db.add_node(self.conn, "data science", type_="concept")
+        far = db.add_node(self.conn, "football", type_="concept")
+        db.set_embedding(self.conn, near, [1.0, 0.0, 0.0])
+        db.set_embedding(self.conn, mid, [0.7, 0.7, 0.0])
+        db.set_embedding(self.conn, far, [0.0, 0.0, 1.0])
+        self.conn.commit()
+        ranked = graph.semantic_search(self.conn, [1.0, 0.0, 0.0], limit=3)
+        names = [r["name"] for _, r in ranked]
+        self.assertEqual(names, ["neural networks", "data science", "football"])
+        self.assertGreater(ranked[0][0], ranked[1][0])  # scores descend
+
+    def test_semantic_search_skips_unembedded(self):
+        db.add_node(self.conn, "no-embedding", type_="concept")
+        self.conn.commit()
+        self.assertEqual(graph.semantic_search(self.conn, [1.0, 0.0]), [])
+
+
 class PortabilityTests(BrainTestCase):
     def _seed(self):
         a = db.add_node(self.conn, "transformers", type_="concept", content="nets")

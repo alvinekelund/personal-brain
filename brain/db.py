@@ -1,3 +1,4 @@
+import json
 import re
 import sqlite3
 import uuid
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     weight        REAL NOT NULL DEFAULT 1.0,
     confidence    REAL NOT NULL DEFAULT 0.8,
     half_life_days REAL NOT NULL DEFAULT 60.0,
-    archived      INTEGER NOT NULL DEFAULT 0
+    archived      INTEGER NOT NULL DEFAULT 0,
+    embedding     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -133,6 +135,10 @@ def _migrate(conn):
             conn.execute(f"ALTER TABLE edges ADD COLUMN {col} {defn}")
     # backfill last_reinforced = created_at where still 0
     conn.execute("UPDATE edges SET last_reinforced = created_at WHERE last_reinforced = 0")
+    # nodes.embedding (semantic search) — added later than the initial schema
+    node_cols = {row[1] for row in conn.execute("PRAGMA table_info(nodes)")}
+    if "embedding" not in node_cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN embedding TEXT")
 
 
 def new_id():
@@ -183,6 +189,13 @@ def touch_node(conn, node_id):
         """UPDATE nodes SET last_accessed = ?, access_count = access_count + 1,
            weight = 1.0 WHERE id = ?""",
         (now(), node_id),
+    )
+
+
+def set_embedding(conn, node_id, vector):
+    """Store a node's embedding vector (JSON-encoded) for semantic search."""
+    conn.execute(
+        "UPDATE nodes SET embedding = ? WHERE id = ?", (json.dumps(vector), node_id)
     )
 
 

@@ -73,7 +73,9 @@ brain show --min-weight 0.3      # hide faded nodes
 brain show --type concept        # filter by type
 
 # Search
-brain query "attention"
+brain query "attention"               # keyword / stem search
+brain reindex                         # embed all nodes (needed once for semantic)
+brain query "machine learning" --semantic   # rank by meaning, not keywords
 
 # Context document (pipe into Claude, ChatGPT, etc.)
 brain context "machine learning"
@@ -82,6 +84,7 @@ brain context > context.md
 # Maintenance
 brain status                     # stats + decay report
 brain synthesize                 # find and surface new connections
+brain reindex                    # (re)compute embeddings for semantic search
 brain decay                      # run decay manually
 brain prune                      # delete archived nodes
 

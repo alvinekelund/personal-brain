@@ -10,6 +10,7 @@ import urllib.request
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_MODEL = "gemini-2.5-flash"
+EMBED_MODEL = "gemini-embedding-001"
 
 
 def api_key() -> str:
@@ -24,6 +25,29 @@ def api_key() -> str:
 
 def have_key() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+
+
+def embed(text: str, model: str = EMBED_MODEL, timeout: float = 30.0) -> list:
+    """Return the embedding vector for `text` via the Gemini embeddings API."""
+    body = {"model": f"models/{model}", "content": {"parts": [{"text": text}]}}
+    req = urllib.request.Request(
+        f"{API_ROOT}/{model}:embedContent",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key()},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(
+            f"Gemini embeddings error {e.code}: {e.read().decode(errors='replace')[:300]}"
+        ) from None
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Could not reach Gemini embeddings API: {e.reason}") from None
+    try:
+        return data["embedding"]["values"]
+    except (KeyError, TypeError):
+        raise RuntimeError(f"Unexpected embeddings response: {json.dumps(data)[:200]}")
 
 
 def parse_json(raw: str):

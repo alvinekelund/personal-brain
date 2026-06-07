@@ -12,7 +12,11 @@ SCHEMA_VERSION = 1
 
 
 def export_brain(conn) -> dict:
-    nodes = [dict(r) for r in conn.execute("SELECT * FROM nodes").fetchall()]
+    nodes = []
+    for r in conn.execute("SELECT * FROM nodes").fetchall():
+        d = dict(r)
+        d.pop("embedding", None)  # bulky + recomputable via `brain reindex`; keep exports lean
+        nodes.append(d)
     edges = [dict(r) for r in conn.execute("SELECT * FROM edges").fetchall()]
     return {"schema_version": SCHEMA_VERSION, "nodes": nodes, "edges": edges}
 
