@@ -179,6 +179,56 @@ def context(topic, depth, min_weight):
     click.echo(doc)
 
 
+# ── reorganize ────────────────────────────────────────────────────────────────
+
+@cli.command()
+def reorganize():
+    """Retrofit existing nodes into the person-rooted hierarchy + re-score importance."""
+    conn = db.connect()
+    _run_decay(conn)
+    user = config.get_user()
+    if not user:
+        click.echo("Run `brain setup` first so the tree has a root.", err=True)
+        sys.exit(1)
+    db.ensure_identity_anchor(conn, user)
+
+    nodes = [n for n in db.all_nodes(conn)
+             if n["type"] != "category" and n["name"].lower() != user.lower()]
+    if not nodes:
+        click.echo("Nothing to reorganize.")
+        return
+    categories = [n["name"] for n in db.all_nodes(conn) if n["type"] == "category"]
+
+    click.echo(f"Reorganizing {len(nodes)} node(s) via the LLM...")
+    plan = extract.plan_hierarchy(nodes, user, categories)
+    # keep only assignments for nodes that exist; grouping names the LLM invented
+    # are created as proper `category` nodes via parent resolution, not as concepts
+    existing = {n["name"].strip().lower() for n in nodes}
+    plan = [p for p in plan if (p.get("name") or "").strip().lower() in existing]
+    if not plan:
+        click.echo("Could not produce a plan (LLM error?).", err=True)
+        sys.exit(1)
+
+    # build the part_of spine (reuses merge's tree-enforcement); existing nodes are touched
+    _, edge_ids = extract.merge_into_db(conn, {"nodes": plan, "edges": []},
+                                        "reorganize", "", user=user)
+    # apply re-scored importance
+    name_to_id = {n["name"].lower(): n["id"] for n in db.all_nodes(conn)}
+    rescored = 0
+    for item in plan:
+        nid = name_to_id.get((item.get("name") or "").strip().lower())
+        if nid and item.get("importance") is not None:
+            try:
+                conn.execute("UPDATE nodes SET importance=? WHERE id=?",
+                             (float(item["importance"]), nid))
+                rescored += 1
+            except (TypeError, ValueError):
+                pass
+    conn.commit()
+    click.echo(f"Reorganized: {len(edge_ids)} hierarchy edge(s), {rescored} importance update(s). "
+               f"Run `brain tree` to see it.")
+
+
 # ── tree ──────────────────────────────────────────────────────────────────────
 
 @cli.command()

@@ -259,6 +259,35 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
     return new_nodes, new_edges
 
 
+def plan_hierarchy(nodes: list, user: str, categories: list | None = None) -> list:
+    """Ask the LLM to place existing (flat) nodes into the person-rooted tree.
+
+    Returns [{name, parent, importance}] for retrofitting an old graph. Used by
+    `brain reorganize`. Best-effort: returns [] on any failure.
+    """
+    if not nodes:
+        return []
+    catalog = [{"name": n["name"], "type": n["type"]} for n in nodes]
+    prompt = (
+        f"The person is {user}. Organise these existing knowledge-graph nodes into a "
+        f"tree rooted at {user}. For each node give a 'parent' (the broader node or "
+        f"category it belongs under) and an 'importance' (0.0-1.0).\n"
+        f"- {user}'s ONLY direct children are broad category nodes (Career, Hobbies, "
+        f"Relationships, Health, Education, ...); never attach a node directly to {user}.\n"
+        f"- reuse these existing categories when they fit: "
+        f"{', '.join(categories or []) or '(none yet)'}\n"
+        f"- importance: identity/close people/core skills/long-term → 0.8-1.0; "
+        f"general interests → 0.4-0.7; one-off details → 0.1-0.3.\n\n"
+        f"Nodes:\n{json.dumps(catalog, ensure_ascii=False)}\n\n"
+        f'Return ONLY JSON: {{"nodes": [{{"name": "...", "parent": "...", "importance": 0.0-1.0}}]}}'
+    )
+    try:
+        data = llm.parse_json(llm.generate(prompt, response_json=True))
+        return data.get("nodes", []) if isinstance(data, dict) else []
+    except Exception:
+        return []
+
+
 def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
                   entity_links: dict | None = None, user: str = ""):
     """Write extracted nodes/edges into the DB, deduplicating by name and entity links."""

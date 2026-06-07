@@ -353,6 +353,38 @@ class HierarchyTests(BrainTestCase):
         self.assertTrue(all(p["type"] == "category" for p in bjorn_parents))
         self.assertNotIn(alvin["id"], [p["id"] for p in bjorn_parents])
 
+    def test_plan_hierarchy_parses_llm(self):
+        nodes = [{"name": "football", "type": "concept"}, {"name": "Bjorn", "type": "person"}]
+        orig = llm.generate
+        llm.generate = lambda *a, **k: (
+            '{"nodes":[{"name":"football","parent":"Hobbies","importance":0.7},'
+            '{"name":"Bjorn","parent":"Relationships","importance":0.8}]}'
+        )
+        try:
+            plan = extract.plan_hierarchy(nodes, "Alvin", [])
+        finally:
+            llm.generate = orig
+        self.assertEqual(len(plan), 2)
+        self.assertEqual(plan[0]["parent"], "Hobbies")
+
+    def test_reorganize_plan_builds_tree_from_flat(self):
+        # simulate: flat nodes already exist; a plan re-parents them under categories
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        db.add_node(self.conn, "football", type_="concept")
+        db.add_node(self.conn, "Bjorn", type_="person")
+        self.conn.commit()
+        plan = [
+            {"name": "football", "parent": "Hobbies", "importance": 0.7},
+            {"name": "Bjorn", "parent": "Relationships", "importance": 0.8},
+        ]
+        extract.merge_into_db(self.conn, {"nodes": plan, "edges": []}, "reorg", "", user="Alvin")
+        hobbies = db.get_node_by_name(self.conn, "Hobbies")
+        self.assertEqual(hobbies["type"], "category")
+        football = db.get_node_by_name(self.conn, "football")
+        parents = {e["target_id"] for e in db.edges_for_node(self.conn, football["id"])
+                   if e["source_id"] == football["id"] and e["relation"] == "part_of"}
+        self.assertIn(hobbies["id"], parents)
+
     def test_reuses_existing_category(self):
         db.ensure_identity_anchor(self.conn, "Alvin")
         cat = db.add_node(self.conn, "Hobbies", type_="category", importance=0.9)
