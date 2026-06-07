@@ -733,6 +733,24 @@ class GraphTests(BrainTestCase):
         self.assertIn(hub, nodes)              # hub kept
         self.assertTrue(all(n not in nodes for n in noise))  # its other leaves pruned
 
+    def test_answer_question_retrieves_and_answers(self):
+        db.add_node(self.conn, "Football", type_="concept", content="Alvin plays football on weekends")
+        self.conn.commit()
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "He plays football.")[1]
+        try:
+            res = graph.answer_question(self.conn, "what sport does he play")
+        finally:
+            llm.generate = orig
+        self.assertEqual(res["answer"], "He plays football.")
+        self.assertIn("Football", res["sources"])       # retrieved the right node
+        self.assertIn("Football", captured["p"])         # and put it in the prompt
+
+    def test_answer_question_empty_brain(self):
+        res = graph.answer_question(self.conn, "anything?")
+        self.assertEqual(res["sources"], [])
+
     def test_synthesize_context_is_importance_ordered(self):
         nodes = {
             "1": {"name": "Trivial detail", "type": "concept", "content": "x",

@@ -203,6 +203,34 @@ def semantic_search(conn, query_vector: list, min_weight: float = 0.0, limit: in
     return scored[:limit]
 
 
+def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0) -> dict:
+    """Answer a natural-language question from the brain: retrieve the most
+    relevant nodes (semantic, falling back to keyword) and have the LLM answer
+    using only them. Accessing them reinforces them. Returns {answer, sources}."""
+    nodes = []
+    try:
+        if llm.have_key():
+            nodes = [r for _, r in semantic_search(conn, llm.embed(question),
+                                                   min_weight=min_weight, limit=k)]
+    except Exception:
+        nodes = []
+    if not nodes:
+        nodes = db.search_nodes(conn, question, min_weight=min_weight)[:k]
+    if not nodes:
+        return {"answer": "I don't have anything on that yet.", "sources": []}
+
+    ctx = "\n".join(f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in nodes)
+    prompt = (
+        "Answer the question using ONLY the following knowledge about the person. "
+        "If the answer isn't contained in it, say you don't have that. Be concise and direct.\n\n"
+        f"Knowledge:\n{ctx}\n\nQuestion: {question}"
+    )
+    for n in nodes:  # asking accesses these memories → reinforce them
+        db.touch_node(conn, n["id"])
+    conn.commit()
+    return {"answer": llm.generate(prompt).strip(), "sources": [n["name"] for n in nodes]}
+
+
 def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:
     """Search nodes and touch them (reinforcing weight)."""
     results = db.search_nodes(conn, query, min_weight=min_weight)

@@ -96,6 +96,7 @@ brain show --type concept        # filter by type
 brain query "attention"               # keyword / stem search
 brain reindex                         # embed all nodes (needed once for semantic)
 brain query "machine learning" --semantic   # rank by meaning, not keywords
+brain ask "where do I want to study?"        # Q&A — answers from your brain, with sources
 
 # Context document (pipe into Claude, ChatGPT, etc.)
 brain context "machine learning"
@@ -136,9 +137,9 @@ evolve as you think out loud:
 
 - **Talk to your brain** — type a thought in the box; it's ingested and the graph
   reloads with the new nodes (no second terminal).
-- **Everything inline** — search (keyword or semantic), build a context document,
-  run synthesize / reorganize, and view status & the hierarchy, all from a control
-  bar with results in a side panel.
+- **Everything inline** — search (keyword or semantic), **ask a question** (Q&A
+  with sources), build a context document, run synthesize / reorganize, and view
+  status & the hierarchy, all from a control bar with results in a side panel.
 - **2D or 3D** — toggle between the Pyvis force-graph and a WebGL 3D force-graph;
   categories are hubs, the `part_of` backbone shows directional arrows.
 - **Explore** — a min-weight slider fades out trivia; click any node to see its

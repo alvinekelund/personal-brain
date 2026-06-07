@@ -147,6 +147,20 @@ def query(query, min_weight, limit, semantic):
         )
 
 
+# ── ask ───────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.argument("question")
+def ask(question):
+    """Ask your brain a question; it answers from what it knows."""
+    conn = db.connect()
+    _run_decay(conn)
+    res = graph.answer_question(conn, question)
+    click.echo(res["answer"])
+    if res["sources"]:
+        click.echo("\nsources: " + ", ".join(res["sources"]))
+
+
 # ── context ───────────────────────────────────────────────────────────────────
 
 @cli.command()

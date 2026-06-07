@@ -41,6 +41,10 @@ def api_query(conn, q, semantic):
              "content": (r["content"] or "")[:140]} for r in res]
 
 
+def api_ask(conn, q):
+    return graph.answer_question(conn, q) if q else {"answer": "", "sources": []}
+
+
 def api_context(conn, topic):
     nodes, fb = graph.collect_context_nodes(conn, topic=topic)
     if not nodes:
@@ -111,8 +115,10 @@ _UI = """
   <input id="qin" placeholder="search…" style="width:150px"/>
   <label style="color:#9aa;font-size:12px"><input type="checkbox" id="qsem"/> semantic</label>
   <button onclick="bQuery()">Search</button>
-  <input id="cin" placeholder="context topic…" style="width:150px"/>
+  <input id="cin" placeholder="context topic…" style="width:130px"/>
   <button onclick="bContext()">Context</button>
+  <input id="askin" placeholder="ask a question…" style="width:150px"/>
+  <button onclick="bAsk()">Ask</button>
   <button onclick="bSynth()">Synthesize</button>
   <button onclick="bReorg()">Reorganize</button>
   <button onclick="bStatus()">Status</button>
@@ -138,6 +144,9 @@ async function bQuery(){const q=$('qin').value.trim();if(!q)return;const sem=$('
  show('Search: '+esc(q), r.map(x=>'• ['+x.type+'] '+esc(x.name)+(x.score!=null?'  ('+x.score+')':'')+'\\n   '+esc(x.content)).join('\\n')||'(no results)');}
 async function bContext(){const t=$('cin').value.trim();if(!t)return;show('Context: '+esc(t),'synthesising…');
  const j=await (await fetch('/context?topic='+encodeURIComponent(t))).json();show('Context: '+esc(t), esc(j.doc));}
+async function bAsk(){const q=$('askin').value.trim();if(!q)return;show('Q: '+esc(q),'thinking…');
+ const j=await (await fetch('/ask?q='+encodeURIComponent(q))).json();
+ show('Q: '+esc(q), esc(j.answer)+'\\n\\nsources: '+esc((j.sources||[]).join(', ')));}
 async function bSynth(){show('Synthesize','working…');const j=await (await fetch('/synthesize',{method:'POST'})).json();
  show('Synthesize',(j.made||[]).map(m=>'• '+esc(m.source)+' --'+m.relation+'--> '+esc(m.target)).join('\\n')||'(no new links)');setTimeout(()=>location.reload(),700);}
 async function bReorg(){show('Reorganize','working…');const j=await (await fetch('/reorganize',{method:'POST'})).json();
@@ -157,7 +166,7 @@ window.brainNodeClick=async id=>{ if(!id)return; showNode(await (await fetch('/n
  else setTimeout(hook2D,300); })();
 function setMin(v){const u=new URL(location);u.searchParams.set('min',v);location=u;}
 (function(){const u=new URL(location),m=u.searchParams.get('min');if(m){$('mw').value=m;$('mwv').textContent=m;}})();
-['addin','qin','cin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext][k]();}));
+['addin','qin','cin','askin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext,bAsk][k]();}));
 setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim();if(v&&v!==_V)location.reload();}catch(e){}},%(ms)d);
 </script>
 """
@@ -197,6 +206,8 @@ def make_handler(interval: float):
                     self._json(api_query(conn, qs.get("q", [""])[0], qs.get("semantic", ["0"])[0] == "1"))
                 elif u.path == "/context":
                     self._json(api_context(conn, qs.get("topic", [""])[0]))
+                elif u.path == "/ask":
+                    self._json(api_ask(conn, qs.get("q", [""])[0]))
                 elif u.path == "/status":
                     self._json(api_status(conn))
                 elif u.path == "/tree":
