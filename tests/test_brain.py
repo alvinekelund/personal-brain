@@ -178,8 +178,11 @@ class ServerTests(BrainTestCase):
         self.assertIn("GRAPH", html)
         self.assertIn("/version", html)            # polls for changes
         self.assertIn("location.reload", html)     # reloads on change
-        self.assertIn("brainAdd", html)            # in-page "talk to your brain" box
+        self.assertIn("talk to your brain", html)  # in-page add box
         self.assertIn("/add", html)                # posts new content
+        self.assertIn("/query", html)              # full feature set wired in
+        self.assertIn("/context", html)
+        self.assertIn("/synthesize", html)
         self.assertTrue(html.endswith("</body></html>") or "</body>" in html)
 
 
@@ -202,6 +205,58 @@ class IngestTests(BrainTestCase):
         parents = [e for e in db.edges_for_node(self.conn, piano["id"])
                    if e["source_id"] == piano["id"] and e["relation"] == "part_of"]
         self.assertTrue(parents)  # placed under a category, not floating
+
+
+class ServerApiTests(BrainTestCase):
+    def test_api_status(self):
+        from brain import server
+        db.add_node(self.conn, "X", type_="concept")
+        self.conn.commit()
+        out = server.api_status(self.conn)
+        self.assertIn("stats", out)
+        self.assertIn("fading", out)
+        self.assertGreaterEqual(out["stats"]["total"], 1)
+
+    def test_api_query_keyword(self):
+        from brain import server
+        db.add_node(self.conn, "transformer architectures", type_="concept", content="nets")
+        self.conn.commit()
+        out = server.api_query(self.conn, "transformers", semantic=False)
+        self.assertTrue(any(r["name"] == "transformer architectures" for r in out))
+
+    def test_api_tree(self):
+        from brain import server
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        cat = db.add_node(self.conn, "Hobbies", type_="category")
+        n = db.add_node(self.conn, "football", type_="concept")
+        db.add_edge(self.conn, n, cat, "part_of")
+        db.add_edge(self.conn, cat, db.get_node_by_name(self.conn, "Alvin")["id"], "part_of")
+        self.conn.commit()
+        text = server.api_tree(self.conn, user="Alvin")
+        self.assertIn("Alvin", text)
+        self.assertIn("Hobbies", text)
+        self.assertIn("football", text)
+
+
+class ReorganizeTests(BrainTestCase):
+    def test_reorganize_builds_hierarchy_and_rescores(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        db.add_node(self.conn, "football", type_="concept")
+        db.add_node(self.conn, "Bjorn", type_="person")
+        self.conn.commit()
+        orig = extract.plan_hierarchy
+        extract.plan_hierarchy = lambda nodes, user, cats: [
+            {"name": "football", "parent": "Hobbies", "importance": 0.6},
+            {"name": "Bjorn", "parent": "Relationships", "importance": 0.8},
+        ]
+        try:
+            edges, rescored = extract.reorganize(self.conn, "Alvin")
+        finally:
+            extract.plan_hierarchy = orig
+        self.assertGreater(edges, 0)
+        self.assertEqual(rescored, 2)
+        self.assertEqual(db.get_node_by_name(self.conn, "Hobbies")["type"], "category")
+        self.assertAlmostEqual(db.get_node_by_name(self.conn, "football")["importance"], 0.6, places=2)
 
 
 class ClearTests(BrainTestCase):

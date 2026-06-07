@@ -423,6 +423,40 @@ def embed_nodes(conn, node_ids) -> int:
     return done
 
 
+def reorganize(conn, user: str):
+    """Retrofit existing flat nodes into the person-rooted hierarchy and re-score
+    importance (LLM plans parents). Returns (hierarchy_edges, importance_updates).
+    Shared by `brain reorganize` and the web view."""
+    from brain import db
+
+    if user:
+        db.ensure_identity_anchor(conn, user)
+    nodes = [n for n in db.all_nodes(conn)
+             if n["type"] != "category" and n["name"].lower() != (user or "").lower()]
+    if not nodes:
+        return (0, 0)
+    categories = [n["name"] for n in db.all_nodes(conn) if n["type"] == "category"]
+    plan = plan_hierarchy(nodes, user, categories)
+    existing = {n["name"].strip().lower() for n in nodes}
+    plan = [p for p in plan if (p.get("name") or "").strip().lower() in existing]
+    if not plan:
+        return (0, 0)
+    _, edge_ids = merge_into_db(conn, {"nodes": plan, "edges": []}, "reorganize", "", user=user)
+    name_to_id = {n["name"].lower(): n["id"] for n in db.all_nodes(conn)}
+    rescored = 0
+    for item in plan:
+        nid = name_to_id.get((item.get("name") or "").strip().lower())
+        if nid and item.get("importance") is not None:
+            try:
+                conn.execute("UPDATE nodes SET importance=? WHERE id=?",
+                             (float(item["importance"]), nid))
+                rescored += 1
+            except (TypeError, ValueError):
+                pass
+    conn.commit()
+    return (len(edge_ids), rescored)
+
+
 def ingest(conn, raw: str, source: str = "", user: str = ""):
     """Full ingestion pipeline shared by `brain add` and the web view:
     ensure identity → extract → entity-link → merge (with hierarchy) → embed.
