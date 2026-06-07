@@ -115,6 +115,18 @@ def show(min_weight, type_filter, color_by):
     click.echo(f"Graph opened: {path}")
 
 
+# ── serve ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--port", default=8000, show_default=True)
+@click.option("--interval", default=3.0, show_default=True, help="seconds between change checks")
+@click.option("--no-open", is_flag=True, help="don't auto-open the browser")
+def serve(port, interval, no_open):
+    """Serve a live graph that reloads as you talk to the brain."""
+    from brain import server
+    server.serve(port=port, interval=interval, open_browser=not no_open)
+
+
 # ── query ─────────────────────────────────────────────────────────────────────
 
 @cli.command()

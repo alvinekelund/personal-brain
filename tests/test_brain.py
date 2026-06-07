@@ -154,6 +154,33 @@ class DecayTests(BrainTestCase):
         self.assertEqual(names, ["low", "mid"])  # lowest decaying first; person excluded
 
 
+class ServerTests(BrainTestCase):
+    def test_fingerprint_changes_on_change(self):
+        from brain import server
+        f0 = server.fingerprint(self.conn)
+        nid = db.add_node(self.conn, "X", type_="concept")
+        self.conn.commit()
+        f1 = server.fingerprint(self.conn)
+        self.assertNotEqual(f0, f1)            # add changes it
+        db.touch_node(self.conn, nid)
+        self.conn.commit()
+        self.assertNotEqual(f1, server.fingerprint(self.conn))  # access changes it
+
+    def test_render_page_injects_live_reload(self):
+        from brain import server
+        import brain.visualize as visualize
+        orig = visualize.build_html
+        visualize.build_html = lambda conn, **k: "<html><body>GRAPH</body></html>"
+        try:
+            html = server.render_page(self.conn, interval=3)
+        finally:
+            visualize.build_html = orig
+        self.assertIn("GRAPH", html)
+        self.assertIn("/version", html)            # polls for changes
+        self.assertIn("location.reload", html)     # reloads on change
+        self.assertTrue(html.endswith("</body></html>") or "</body>" in html)
+
+
 class ClearTests(BrainTestCase):
     def test_clear_empties_all_tables(self):
         a = db.add_node(self.conn, "A", type_="concept")

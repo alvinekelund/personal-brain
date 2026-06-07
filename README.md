@@ -86,7 +86,8 @@ brain add --file notes.txt
 brain add --url https://arxiv.org/abs/1706.03762
 
 # Explore
-brain show                       # open interactive graph
+brain serve                      # live web view — keep open; reloads as you talk to the brain
+brain show                       # open a one-shot interactive graph
 brain show --min-weight 0.3      # hide faded nodes
 brain show --type concept        # filter by type
 
@@ -159,6 +160,7 @@ Query / Output
 | `brain/graph.py` | BFS (hub-aware), keyword + semantic search, context synthesis |
 | `brain/llm.py` | Gemini REST client (generate + embed) over stdlib urllib, with retries |
 | `brain/visualize.py` | Pyvis interactive graph |
+| `brain/server.py` | Live auto-reloading web view (`brain serve`) |
 | `brain/portability.py` | JSON export / import |
 | `cli.py` | Click CLI entry point |
 
