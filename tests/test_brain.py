@@ -8,6 +8,7 @@ Covers the pure logic layer — decay curve, search, dedup/merge, graph traversa
 context seeding, and .env loading. The LLM (Gemini) boundary is mocked, so these
 tests are deterministic and need no API key or network.
 """
+import io
 import os
 import sys
 import tempfile
@@ -728,6 +729,7 @@ class PortabilityTests(BrainTestCase):
         db.DB_PATH = path
         conn = db.connect()
         db.DB_PATH = orig
+        self.addCleanup(conn.close)
         return conn
 
     def test_export_includes_everything(self):
@@ -805,9 +807,10 @@ class LLMRetryTests(unittest.TestCase):
         calls = {"n": 0}
         def bad_key(req, timeout):
             calls["n"] += 1
-            raise ue.HTTPError("u", 400, "bad", {}, None)
-        with self.assertRaises(ue.HTTPError):
+            raise ue.HTTPError("u", 400, "bad", {}, io.BytesIO(b"bad"))
+        with self.assertRaises(ue.HTTPError) as cm:
             self._run(bad_key)
+        cm.exception.close()  # avoid ResourceWarning on GC
         self.assertEqual(calls["n"], 1)  # 4xx not retried
 
 
