@@ -10,15 +10,19 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 ## What it does
 
-**Ingestion** — point it at anything: a paragraph, an article, a book chapter, a meeting transcript. Gemini Flash extracts typed nodes (concepts, skills, projects, people, facts, insights, events) and semantic edges (builds_on, requires, contradicts, part_of, etc.).
+**Ingestion** — point it at anything: a paragraph, an article, a book chapter, a meeting transcript. Gemini Flash extracts typed nodes (concepts, skills, projects, people, facts, insights, events) and semantic edges (builds_on, requires, contradicts, part_of, etc.). Long input is chunked so nothing is dropped.
 
-**Forgetting** — each node has a weight that decays according to its type. An event has a half-life of 7 days; a skill, 180 days; a person never expires. Weight drops below 0.1 → archived. Archived for 7 days → deleted. Accessing a node resets weight to 1.0. The decay runs automatically on every CLI call — no cron job needed.
+**Person-rooted hierarchy** — it's a graph, but with a backbone: every node is placed under a `category` (Career, Hobbies, Relationships, …) that hangs off *you*, forming a `You → Category → Topic → Detail` tree via `part_of` — while cross-links between branches keep it a graph. `brain tree` prints the hierarchy; `brain reorganize` retrofits an existing flat brain into it.
 
-**Visualization** — `brain show` opens an interactive force-directed graph. Nodes are sized by weight, coloured by type. Hover for content, filter by weight threshold or type.
+**Importance-weighted forgetting** — each node has an `importance` (0–1, scored at ingest) and a type half-life. Important nodes decay much slower and never auto-archive; one-off details still fade. Accessing a node resets it to 1.0 and propagates a freshness boost up its branch. Decay runs automatically on every CLI call.
 
-**Context injection** — `brain context "ML internships"` does a BFS traversal from relevant nodes, then calls Gemini to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
+**Search** — `brain query "x"` (stem-aware keyword) or `brain query "x" --semantic` (embedding cosine — finds by *meaning*, e.g. "machine learning" surfaces your neural-net nodes). `brain reindex` (re)computes embeddings; new nodes are embedded automatically on `add`.
 
-**Synthesis** — `brain synthesize` finds isolated nodes and tries to connect them to the existing graph, surfacing relationships Gemini notices across your knowledge.
+**Visualization** — `brain show` opens an interactive force-directed graph: categories are large hubs, the `part_of` backbone is solid arrows, cross-links are dashed, node size reflects importance. Hover for content; filter by weight or type.
+
+**Context injection** — `brain context "ML internships"` seeds from keyword → semantic → whole-brain (in that order), BFS-traverses (hub-aware), then calls Gemini to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
+
+**Synthesis** — `brain synthesize` finds isolated nodes and connects them to the graph, surfacing relationships Gemini notices across your knowledge.
 
 ---
 
@@ -26,13 +30,19 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 | Type | Half-life | Rationale |
 |------|-----------|-----------|
+| task | 5 days | Actionable items fade once stale |
 | event | 7 days | Ephemeral |
 | fact | 21 days | Specific facts fade fast |
+| artifact | 30 days | Documents/files are temporary references |
 | concept | 60 days | Ideas need reinforcement |
 | insight | 90 days | Synthesis products |
 | skill | 180 days | Skills are durable |
 | project | 365 days | Projects are long-lived |
-| person | never | People don't expire |
+| person / organization / category | never | Identity & structure don't expire |
+
+These are *base* half-lives. A node's `importance` (0–1) stretches its effective
+half-life by up to 5× and sets a weight floor, so important nodes persist far
+longer (and never auto-archive) while trivia decays on the base schedule.
 
 ---
 
@@ -81,8 +91,12 @@ brain query "machine learning" --semantic   # rank by meaning, not keywords
 brain context "machine learning"
 brain context > context.md
 
+# Hierarchy
+brain tree                       # print the person-rooted hierarchy
+brain reorganize                 # retrofit existing flat nodes into the hierarchy
+
 # Maintenance
-brain status                     # stats + decay report
+brain status                     # stats + decay report + what's fading soon
 brain synthesize                 # find and surface new connections
 brain reindex                    # (re)compute embeddings for semantic search
 brain decay                      # run decay manually
@@ -131,11 +145,13 @@ Query / Output
 
 | File | Description |
 |------|-------------|
-| `brain/db.py` | SQLite schema, all node/edge CRUD |
-| `brain/decay.py` | Ebbinghaus curve, decay runner |
-| `brain/extract.py` | Gemini Flash extraction, DB merge |
-| `brain/graph.py` | BFS traversal, context synthesis |
+| `brain/db.py` | SQLite schema, node/edge CRUD, hierarchy, relation vocab |
+| `brain/decay.py` | Importance-weighted half-life decay, at-risk reporting |
+| `brain/extract.py` | Gemini extraction, dedup/merge, hierarchy spine, embeddings |
+| `brain/graph.py` | BFS (hub-aware), keyword + semantic search, context synthesis |
+| `brain/llm.py` | Gemini REST client (generate + embed) over stdlib urllib, with retries |
 | `brain/visualize.py` | Pyvis interactive graph |
+| `brain/portability.py` | JSON export / import |
 | `cli.py` | Click CLI entry point |
 
 ---
