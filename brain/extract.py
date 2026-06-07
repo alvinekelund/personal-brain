@@ -294,9 +294,47 @@ def plan_hierarchy(nodes: list, user: str, categories: list | None = None) -> li
         return []
 
 
+SEMANTIC_DEDUP_THRESHOLD = 0.90   # cosine above which a same-type node is "the same"
+
+
+def _cosine(a, b):
+    import math
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _embed_and_find_dupe(conn, db, name, content, type_):
+    """Embed a candidate node and look for a near-identical existing node of the
+    same type (catches paraphrases the name-based linker misses). Returns
+    (existing_id_or_None, vector). No-ops (returns (None, None)) without a key."""
+    if not llm.have_key():
+        return None, None
+    try:
+        vec = llm.embed(f"{name}. {content}")
+    except Exception:
+        return None, None
+    best_id, best = None, 0.0
+    for r in db.all_nodes(conn):
+        emb = r["embedding"] if "embedding" in r.keys() else None
+        if r["type"] != type_ or not emb:
+            continue
+        try:
+            sim = _cosine(vec, json.loads(emb))
+        except (TypeError, ValueError):
+            continue
+        if sim > best:
+            best, best_id = sim, r["id"]
+    return (best_id if best >= SEMANTIC_DEDUP_THRESHOLD else None), vec
+
+
 def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
                   entity_links: dict | None = None, user: str = ""):
-    """Write extracted nodes/edges into the DB, deduplicating by name and entity links."""
+    """Write extracted nodes/edges into the DB, deduplicating by name, entity
+    links, and semantic similarity (same-type, high cosine)."""
     from brain import db
 
     entity_links = entity_links or {}
@@ -311,7 +349,14 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
             continue
         # resolve through entity linker first, then fall back to name match
         canonical = entity_links.get(name, name)
+        vec = None
         existing = db.get_node_by_name(conn, canonical)
+        if not existing:
+            # semantic dedup: a same-type near-identical node counts as the same entity
+            dupe_id, vec = _embed_and_find_dupe(
+                conn, db, canonical, n.get("content", ""), n.get("type", "concept"))
+            if dupe_id:
+                existing = db.get_node(conn, dupe_id)
         if existing:
             db.touch_node(conn, existing["id"])
             name_to_id[name] = existing["id"]
@@ -327,6 +372,8 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
                 confidence=n.get("confidence", 0.8),
                 importance=n.get("importance", 0.5),
             )
+            if vec:  # reuse the embedding we just computed (skip re-embedding later)
+                db.set_embedding(conn, nid, vec)
             name_to_id[name] = nid
             name_to_id[canonical] = nid
             node_ids.append(nid)
