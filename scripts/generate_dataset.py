@@ -147,6 +147,8 @@ def main():
     ap.add_argument("n", type=int, nargs="?", default=40, help="number of statements to ingest")
     ap.add_argument("--into", help="path to brain.db (default: isolated temp dir)")
     ap.add_argument("--user", default="Alvin", help="identity name (default: Alvin)")
+    ap.add_argument("--parallel", type=int, default=4,
+                    help="concurrent ingests (default: 4; set to 1 for sequential)")
     args = ap.parse_args()
 
     if not llm.have_key():
@@ -163,24 +165,71 @@ def main():
     conn = db.connect()
     db.ensure_identity_anchor(conn, args.user)
 
+    # When running ingests in parallel, pre-create the common top-level categories
+    # so multiple workers don't race to create the same one (which would dupe them).
+    if args.parallel > 1:
+        root = db.get_node_by_name(conn, args.user)
+        for cat in ["Career", "Hobbies", "Education", "Relationships", "Skills",
+                    "Projects", "Learning", "Life Events", "Health", "Family"]:
+            if not db.get_node_by_name(conn, cat):
+                cid = db.add_node(conn, name=cat, type_="category",
+                                  source="pre-seed", importance=0.85)
+                if root:
+                    db.add_edge(conn, cid, root["id"], "part_of")
+        conn.commit()
+
     statements = corpus(args.n)
-    print(f"Ingesting {len(statements)} synthetic statements as '{args.user}' → {where}")
+    mode = f"parallel={args.parallel}" if args.parallel > 1 else "sequential"
+    print(f"Ingesting {len(statements)} synthetic statements as '{args.user}' "
+          f"({mode}) → {where}")
     t0 = time.time()
     ok = failed = 0
-    for i, s in enumerate(statements, 1):
-        try:
-            extract.ingest(conn, s, source="synthetic", user=args.user)
-            ok += 1
-        except Exception as e:
-            failed += 1
-            print(f"  [{i}] failed: {str(e)[:80]}")
-        if i % 5 == 0 or i == len(statements):
-            elapsed = time.time() - t0
-            rate = i / elapsed
-            eta = (len(statements) - i) / rate if rate else 0
-            n_nodes = len(db.all_nodes(conn))
-            print(f"  ...{i}/{len(statements)}  ok={ok} fail={failed}  "
-                  f"nodes={n_nodes}  rate={rate:.1f}/s  eta={eta:.0f}s")
+
+    def progress(i):
+        elapsed = time.time() - t0
+        rate = i / elapsed if elapsed else 0
+        eta = (len(statements) - i) / rate if rate else 0
+        n_nodes = len(db.all_nodes(conn))
+        print(f"  ...{i}/{len(statements)}  ok={ok} fail={failed}  "
+              f"nodes={n_nodes}  rate={rate:.2f}/s  eta={eta:.0f}s")
+
+    if args.parallel > 1:
+        # Each worker thread opens its own sqlite connection (connections are
+        # thread-affine). WAL mode lets readers and one writer at a time work
+        # concurrently — fine for our handful of workers.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def ingest_one(s):
+            wconn = db.connect()
+            try:
+                extract.ingest(wconn, s, source="synthetic", user=args.user)
+                return None
+            except Exception as e:
+                return str(e)[:80]
+            finally:
+                wconn.close()
+
+        with ThreadPoolExecutor(max_workers=args.parallel) as ex:
+            futs = [ex.submit(ingest_one, s) for s in statements]
+            for i, f in enumerate(as_completed(futs), 1):
+                err = f.result()
+                if err:
+                    failed += 1
+                    print(f"  failed: {err}")
+                else:
+                    ok += 1
+                if i % 5 == 0 or i == len(statements):
+                    progress(i)
+    else:
+        for i, s in enumerate(statements, 1):
+            try:
+                extract.ingest(conn, s, source="synthetic", user=args.user)
+                ok += 1
+            except Exception as e:
+                failed += 1
+                print(f"  [{i}] failed: {str(e)[:80]}")
+            if i % 5 == 0 or i == len(statements):
+                progress(i)
 
     report(conn, args.user)
     if args.into:
