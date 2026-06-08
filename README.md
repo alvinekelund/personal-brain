@@ -145,8 +145,9 @@ evolve as you think out loud:
   categories are hubs, the `part_of` backbone shows directional arrows.
 - **Explore** — a min-weight slider fades out trivia; click any node to see its
   content, importance, weight, and connections.
-- **Live** — the page only reloads when the brain actually changes (it polls a
-  cheap state fingerprint), so it never flickers when idle.
+- **Live & incremental** — when the brain changes, the 2D graph updates *in place*
+  (new nodes animate in, existing node positions are preserved) instead of a full
+  reload, so it stays smooth and keeps its layout even on large graphs.
 
 It's stdlib-only (`http.server`) and binds to localhost — your data never leaves
 your machine.

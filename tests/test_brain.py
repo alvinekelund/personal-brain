@@ -170,21 +170,31 @@ class ServerTests(BrainTestCase):
     def test_render_page_injects_live_reload(self):
         from brain import server
         import brain.visualize as visualize
-        orig = visualize.build_html
-        visualize.build_html = lambda conn, **k: "<html><body>GRAPH</body></html>"
+        orig = visualize.build_html_live
+        visualize.build_html_live = lambda conn, **k: "<html><body>GRAPH</body></html>"
         try:
             html = server.render_page(self.conn, interval=3)
         finally:
-            visualize.build_html = orig
+            visualize.build_html_live = orig
         self.assertIn("GRAPH", html)
         self.assertIn("/version", html)            # polls for changes
-        self.assertIn("location.reload", html)     # reloads on change
+        self.assertIn("brainRefresh", html)        # in-place refresh (not full reload)
         self.assertIn('id="addin"', html)          # in-page add box
         self.assertIn("/add", html)                # posts new content
         self.assertIn("/query", html)              # full feature set wired in
         self.assertIn("/context", html)
         self.assertIn("/synthesize", html)
         self.assertTrue(html.endswith("</body></html>") or "</body>" in html)
+
+    def test_graph_data_shape(self):
+        import brain.visualize as visualize
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        db.add_edge(self.conn, a, b, "relates_to")
+        self.conn.commit()
+        d = visualize.graph_data(self.conn)
+        self.assertEqual({n["id"] for n in d["nodes"]}, {a, b})
+        self.assertEqual(d["edges"][0]["id"], f"{a}|{b}|relates_to")  # stable edge id for diffing
 
 
 class IngestTests(BrainTestCase):

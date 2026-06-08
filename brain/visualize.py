@@ -184,6 +184,84 @@ def build_html_3d(conn, min_weight: float = 0.0, type_filter: str | None = None)
     return _HTML_3D.replace("__DATA__", json.dumps({"nodes": gnodes, "links": glinks}))
 
 
+def _node_size(n, importance):
+    if n["type"] == "category":
+        return 34
+    if n["type"] == "person":
+        return 24 + importance * 12
+    return 12 + importance * 16 + n["weight"] * 8
+
+
+def graph_data(conn, min_weight: float = 0.0, type_filter: str | None = None) -> dict:
+    """Source-of-truth node/edge data (stable ids) for the live vis-network view
+    and the /graph diff endpoint. Edge ids are stable so updates are incremental."""
+    nodes = db.all_nodes(conn, min_weight=min_weight)
+    if type_filter:
+        nodes = [n for n in nodes if n["type"] == type_filter]
+    node_ids = {n["id"] for n in nodes}
+
+    vnodes = []
+    for n in nodes:
+        imp = n["importance"] if "importance" in n.keys() else 0.5
+        vnodes.append({
+            "id": n["id"], "label": n["name"],
+            "title": f"{n['name']} [{n['type']}]  w={n['weight']:.2f} imp={imp:.2f}\n{(n['content'] or '')[:160]}",
+            "size": _node_size(n, imp),
+            "color": TYPE_COLORS.get(n["type"], DEFAULT_COLOR),
+            "borderWidth": 3 if n["type"] == "category" else 1,
+        })
+    vedges = []
+    for e in db.all_edges(conn):
+        if e["source_id"] not in node_ids or e["target_id"] not in node_ids:
+            continue
+        po = e["relation"] == "part_of"
+        vedges.append({
+            "id": f"{e['source_id']}|{e['target_id']}|{e['relation']}",
+            "from": e["source_id"], "to": e["target_id"],
+            "color": "#8a97a6" if po else "#3a3a5a",
+            "width": 2.5 if po else 1 + e["weight"] * 2,
+            "dashes": not po, "arrows": "to" if po else "",
+            "label": "" if po else e["relation"],
+        })
+    return {"nodes": vnodes, "edges": vedges}
+
+
+_LIVE_OPTS = """{"physics":{"forceAtlas2Based":{"gravitationalConstant":-80,"centralGravity":0.01,
+"springLength":130},"solver":"forceAtlas2Based","stabilization":{"iterations":60},"adaptiveTimestep":true},
+"edges":{"smooth":{"type":"dynamic"}},"interaction":{"hover":true,"tooltipDelay":120}}"""
+
+_HTML_LIVE = """<!doctype html><html><head><meta charset="utf-8"><title>Brain</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>html,body{margin:0;height:100%;background:#1a1a2e}#net{width:100vw;height:100vh}</style>
+</head><body><div id="net"></div>
+<script>
+const nodes=new vis.DataSet(__NODES__), edges=new vis.DataSet(__EDGES__);
+const network=new vis.Network(document.getElementById('net'),{nodes:nodes,edges:edges},__OPTS__);
+function brainUpdate(d){
+  const ni=new Set(d.nodes.map(n=>n.id));
+  nodes.getIds().forEach(id=>{if(!ni.has(id))nodes.remove(id);});
+  nodes.update(d.nodes);                       // existing keep position; new get placed
+  const ei=new Set(d.edges.map(e=>e.id));
+  edges.getIds().forEach(id=>{if(!ei.has(id))edges.remove(id);});
+  edges.update(d.edges);
+}
+window.brainRefresh=async()=>{ const m=(new URL(location)).searchParams.get('min')||0;
+  try{ brainUpdate(await (await fetch('/graph?min='+m)).json()); }catch(e){} };
+</script></body></html>"""
+
+
+def build_html_live(conn, min_weight: float = 0.0, type_filter: str | None = None) -> str:
+    """A vis-network page backed by DataSets, so the graph can be updated in place
+    (brainUpdate / brainRefresh) without a full reload — existing node positions
+    are preserved, only new nodes are placed."""
+    import json
+    d = graph_data(conn, min_weight=min_weight, type_filter=type_filter)
+    return (_HTML_LIVE
+            .replace("__NODES__", json.dumps(d["nodes"]))
+            .replace("__EDGES__", json.dumps(d["edges"]))
+            .replace("__OPTS__", _LIVE_OPTS))
+
+
 def show(
     conn,
     min_weight: float = 0.0,

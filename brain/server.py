@@ -157,12 +157,13 @@ _UI = """
 </div>
 <script>
 const _V="%(fp)s", $=id=>document.getElementById(id);
+const refresh=()=>window.brainRefresh?window.brainRefresh():location.reload();
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function show(t,b){$('ptitle').innerHTML=t;$('pc').innerHTML=b;$('panel').style.display='block';}
 function msg(m){$('bxmsg').textContent=m;}
 async function bAdd(){const i=$('addin'),t=i.value.trim();if(!t)return;msg('thinking…');
  try{const j=await (await fetch('/add',{method:'POST',body:t})).json();
-  msg(j.error?('error: '+j.error):('+ '+(j.nodes||0)+' nodes'));if(!j.error){i.value='';setTimeout(()=>location.reload(),500);}}catch(e){msg('error');}}
+  msg(j.error?('error: '+j.error):('+ '+(j.nodes||0)+' nodes'));if(!j.error){i.value='';setTimeout(refresh,500);}}catch(e){msg('error');}}
 async function bQuery(){const q=$('qin').value.trim();if(!q)return;const sem=$('qsem').checked?1:0;
  const r=await (await fetch('/query?q='+encodeURIComponent(q)+'&semantic='+sem)).json();
  show('Search: '+esc(q), r.map(x=>'• ['+x.type+'] '+esc(x.name)+(x.score!=null?'  ('+x.score+')':'')+'\\n   '+esc(x.content)).join('\\n')||'(no results)');}
@@ -176,9 +177,9 @@ async function bAsk(){const q=$('askin').value.trim();if(!q)return;$('askin').va
    chat[chat.length-1].a=j.answer; chat[chat.length-1].src=(j.sources||[]).join(', '); }
  catch(e){ chat[chat.length-1].a='error'; } renderChat(); }
 async function bSynth(){show('Synthesize','working…');const j=await (await fetch('/synthesize',{method:'POST'})).json();
- show('Synthesize',(j.made||[]).map(m=>'• '+esc(m.source)+' --'+m.relation+'--> '+esc(m.target)).join('\\n')||'(no new links)');setTimeout(()=>location.reload(),700);}
+ show('Synthesize',(j.made||[]).map(m=>'• '+esc(m.source)+' --'+m.relation+'--> '+esc(m.target)).join('\\n')||'(no new links)');setTimeout(refresh,700);}
 async function bReorg(){show('Reorganize','working…');const j=await (await fetch('/reorganize',{method:'POST'})).json();
- show('Reorganize',(j.edges||0)+' hierarchy edges, '+(j.rescored||0)+' importance updates');setTimeout(()=>location.reload(),700);}
+ show('Reorganize',(j.edges||0)+' hierarchy edges, '+(j.rescored||0)+' importance updates');setTimeout(refresh,700);}
 async function bStatus(){const j=await (await fetch('/status')).json(),s=j.stats;
  let h='nodes: '+s.active+' active / '+s.total+' total\\nedges: '+s.edges+'\\navg weight: '+s.avg_weight+'\\nby type: '+esc(JSON.stringify(s.by_type))+'\\n\\nBy area:\\n';
  h+=(j.areas||[]).map(a=>'• '+esc(a[0])+' ('+a[1]+')').join('\\n')||'(none)';h+='\\n\\nFading soon:\\n';
@@ -202,7 +203,7 @@ function setMin(v){const u=new URL(location);u.searchParams.set('min',v);locatio
 (function(){const u=new URL(location),m=u.searchParams.get('min');if(m)$('mw').value=m;
  const tv=u.searchParams.get('view')==='3d'?'t3d':'t2d';const e=$(tv);if(e)e.classList.add('on');})();
 ['addin','qin','cin','askin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext,bAsk][k]();}));
-setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim();if(v&&v!==_V)location.reload();}catch(e){}},%(ms)d);
+setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim();if(v&&v!==_V)refresh();}catch(e){}},%(ms)d);
 </script>
 """
 
@@ -212,7 +213,7 @@ def render_page(conn, interval: float, view: str = "2d", min_weight: float = 0.0
     if view == "3d":
         html = visualize.build_html_3d(conn, min_weight=min_weight)
     else:
-        html = visualize.build_html(conn, min_weight=min_weight)
+        html = visualize.build_html_live(conn, min_weight=min_weight)
     ui = _UI % {"fp": fingerprint(conn), "ms": int(interval * 1000)}
     return html.replace("</body>", ui + "</body>", 1) if "</body>" in html else html + ui
 
@@ -251,6 +252,12 @@ def make_handler(interval: float):
                     self._send(api_tree(conn), "text/plain")
                 elif u.path == "/node":
                     self._json(api_node(conn, qs.get("id", [""])[0]))
+                elif u.path == "/graph":
+                    try:
+                        mw = float(qs.get("min", ["0"])[0])
+                    except ValueError:
+                        mw = 0.0
+                    self._json(visualize.graph_data(conn, min_weight=mw))
                 else:
                     try:
                         mw = float(qs.get("min", ["0"])[0])
