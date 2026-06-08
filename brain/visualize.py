@@ -206,9 +206,11 @@ def graph_data(conn, min_weight: float = 0.0, type_filter: str | None = None) ->
         vnodes.append({
             "id": n["id"], "label": n["name"],
             "title": f"{n['name']} [{n['type']}]  w={n['weight']:.2f} imp={imp:.2f}\n{(n['content'] or '')[:160]}",
+            "shape": "dot",                    # circular nodes (vs default ellipse)
             "size": _node_size(n, imp),
             "color": TYPE_COLORS.get(n["type"], DEFAULT_COLOR),
             "borderWidth": 3 if n["type"] == "category" else 1,
+            "font": {"color": "#eceefb", "size": 13, "face": "system-ui"},
         })
     vedges = []
     for e in db.all_edges(conn):

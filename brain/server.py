@@ -117,7 +117,7 @@ _UI = """
  .seg a.on,.seg a:hover{background:var(--accent);color:#fff}
  .ctl{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}
  #bxmsg{color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap}
- #panel{position:fixed;top:62px;right:14px;width:410px;max-height:80vh;z-index:9998;background:var(--card);
+ #panel{position:fixed;right:14px;width:410px;max-height:80vh;z-index:9998;background:var(--card);
    border:1px solid var(--border);border-radius:16px;box-shadow:0 16px 48px rgba(0,0,0,.6);display:none;
    overflow:hidden;font-family:system-ui,sans-serif;animation:pin .16s ease}
  @keyframes pin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
@@ -159,7 +159,9 @@ _UI = """
 const _V="%(fp)s", $=id=>document.getElementById(id);
 const refresh=()=>window.brainRefresh?window.brainRefresh():location.reload();
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function show(t,b){$('ptitle').innerHTML=t;$('pc').innerHTML=b;$('panel').style.display='block';}
+function fitPanel(){const h=$('bx').offsetHeight;$('panel').style.top=(h+8)+'px';$('panel').style.maxHeight=(window.innerHeight-h-24)+'px';}
+window.addEventListener('resize',fitPanel);
+function show(t,b){fitPanel();$('ptitle').innerHTML=t;$('pc').innerHTML=b;$('panel').style.display='block';}
 function msg(m){$('bxmsg').textContent=m;}
 async function bAdd(){const i=$('addin'),t=i.value.trim();if(!t)return;msg('thinking…');
  try{const j=await (await fetch('/add',{method:'POST',body:t})).json();
