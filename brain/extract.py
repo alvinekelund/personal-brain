@@ -337,26 +337,71 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
     links, and semantic similarity (same-type, high cosine)."""
     from brain import db
 
+    from concurrent.futures import ThreadPoolExecutor
+
     entity_links = entity_links or {}
+    nodes_in = extracted.get("nodes", [])
     name_to_id = {}
     node_ids = []
     edge_ids = []
 
-    for n in extracted.get("nodes", []):
+    # Pre-embed candidates in PARALLEL (semantic dedup) — the single biggest
+    # ingest cost was doing one sequential embed per new node here.
+    embeds_cache: dict = {}  # canonical.lower() -> vec
+    if llm.have_key():
+        cands = []
+        for n in nodes_in:
+            name = (n.get("name") or "").strip()
+            if not name:
+                continue
+            canonical = entity_links.get(name, name)
+            if db.get_node_by_name(conn, canonical):
+                continue
+            cands.append((canonical.lower(), f"{canonical}. {n.get('content', '')}"))
+        if cands:
+            def _fetch(item):
+                key, text = item
+                try:
+                    return key, llm.embed(text)
+                except Exception:
+                    return key, None
+            with ThreadPoolExecutor(max_workers=min(8, len(cands))) as ex:
+                for key, vec in ex.map(_fetch, cands):
+                    if vec:
+                        embeds_cache[key] = vec
+
+    # Build same-type embedding lookup ONCE (was re-scanned per candidate before).
+    existing_embs_by_type: dict = {}
+    for r in db.all_nodes(conn):
+        emb = r["embedding"] if "embedding" in r.keys() else None
+        if not emb:
+            continue
+        try:
+            existing_embs_by_type.setdefault(r["type"], []).append((r["id"], json.loads(emb)))
+        except (TypeError, ValueError):
+            pass
+
+    for n in nodes_in:
         # defensive: a malformed node (no name) shouldn't abort the whole ingest
         name = (n.get("name") or "").strip()
         if not name:
             continue
         # resolve through entity linker first, then fall back to name match
         canonical = entity_links.get(name, name)
-        vec = None
+        type_ = n.get("type", "concept")
         existing = db.get_node_by_name(conn, canonical)
-        if not existing:
+        vec = embeds_cache.get(canonical.lower())
+
+        if not existing and vec is not None:
             # semantic dedup: a same-type near-identical node counts as the same entity
-            dupe_id, vec = _embed_and_find_dupe(
-                conn, db, canonical, n.get("content", ""), n.get("type", "concept"))
-            if dupe_id:
-                existing = db.get_node(conn, dupe_id)
+            best_id, best = None, 0.0
+            for nid, ev in existing_embs_by_type.get(type_, []):
+                sim = _cosine(vec, ev)
+                if sim > best:
+                    best, best_id = sim, nid
+            if best >= SEMANTIC_DEDUP_THRESHOLD:
+                existing = db.get_node(conn, best_id)
+
         if existing:
             db.touch_node(conn, existing["id"])
             name_to_id[name] = existing["id"]
@@ -366,7 +411,7 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
             nid = db.add_node(
                 conn,
                 name=canonical,
-                type_=n.get("type", "concept"),
+                type_=type_,
                 content=n.get("content", ""),
                 source=source,
                 confidence=n.get("confidence", 0.8),
@@ -374,6 +419,8 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
             )
             if vec:  # reuse the embedding we just computed (skip re-embedding later)
                 db.set_embedding(conn, nid, vec)
+                # so later same-batch candidates can dedup against this one too
+                existing_embs_by_type.setdefault(type_, []).append((nid, vec))
             name_to_id[name] = nid
             name_to_id[canonical] = nid
             node_ids.append(nid)
