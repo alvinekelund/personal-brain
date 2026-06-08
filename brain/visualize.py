@@ -75,7 +75,8 @@ def build_html(
           "springLength": 130
         },
         "solver": "forceAtlas2Based",
-        "stabilization": {"iterations": 150}
+        "stabilization": {"iterations": 60, "updateInterval": 25},
+        "adaptiveTimestep": true
       },
       "edges": {"color": {"opacity": 0.5}, "smooth": {"type": "dynamic"}},
       "interaction": {"hover": true, "tooltipDelay": 100}
@@ -144,6 +145,7 @@ _HTML_3D = """<!doctype html><html><head><meta charset="utf-8"><title>Brain (3D)
 const DATA = __DATA__;
 const G = ForceGraph3D()(document.getElementById('g'))
   .backgroundColor('#0b0b16')
+  .cooldownTicks(60)
   .graphData(DATA)
   .nodeLabel(n => '<div style="background:#16213e;color:#eee;padding:6px 8px;border-radius:6px;font:13px sans-serif;max-width:280px">'
                  + '<b>' + n.name + '</b> [' + n.type + ']<br>' + (n.desc||'') + '</div>')

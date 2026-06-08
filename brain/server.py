@@ -97,45 +97,68 @@ def api_tree(conn, user=None):
 
 _UI = """
 <style>
- #bx{position:fixed;top:0;left:0;right:0;z-index:9999;background:#16213e;border-bottom:1px solid #0f3460;
-   font-family:sans-serif;padding:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
- #bx input{padding:7px 9px;border-radius:6px;border:1px solid #444;background:#0f0f1e;color:#eee}
- #bx button{padding:7px 12px;border-radius:6px;border:0;background:#0f3460;color:#fff;cursor:pointer}
- #bx button.p{background:#4A90D9}
- #bxmsg{color:#9aa;margin-left:auto;font-size:13px}
- #panel{position:fixed;top:54px;right:0;width:380px;max-height:82vh;overflow:auto;z-index:9998;
-   background:rgba(15,15,30,0.95);color:#ddd;font:13px/1.45 monospace;padding:12px;
-   border-left:1px solid #0f3460;display:none;white-space:pre-wrap}
- #panel h4{margin:0 0 8px;color:#4A90D9;font-family:sans-serif}
- #panel .close{float:right;cursor:pointer;color:#888}
+ :root{--accent:#5b8def;--text:#eceefb;--muted:#9aa0b8;--border:#2a2f4f;--card:#1a1d33;}
+ #bx{position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+   padding:9px 14px;background:linear-gradient(180deg,#1b1f3a,#141729);border-bottom:1px solid var(--border);
+   box-shadow:0 3px 14px rgba(0,0,0,.45);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+ .brand{font-weight:700;color:var(--text);font-size:15px;white-space:nowrap;letter-spacing:.2px}
+ .brand b{color:var(--accent)}
+ .inp{padding:8px 11px;border-radius:9px;border:1px solid var(--border);background:#0d0f20;color:var(--text);
+   font-size:13px;outline:none;font-family:inherit;transition:border-color .12s}
+ .inp:focus{border-color:var(--accent)}
+ .btn{padding:8px 13px;border-radius:9px;border:1px solid var(--border);background:#23274a;color:var(--text);
+   cursor:pointer;font-size:13px;font-family:inherit;transition:.12s;white-space:nowrap}
+ .btn:hover{background:#2d3360;border-color:var(--accent)}
+ .btn.primary{background:linear-gradient(180deg,var(--accent),#4470cf);border:0;color:#fff;font-weight:600}
+ .btn.primary:hover{filter:brightness(1.12)}
+ .sep{width:1px;height:22px;background:var(--border)}
+ .seg{display:flex;border:1px solid var(--border);border-radius:9px;overflow:hidden}
+ .seg a{padding:7px 12px;color:var(--muted);text-decoration:none;font-size:12px;font-weight:600}
+ .seg a.on,.seg a:hover{background:var(--accent);color:#fff}
+ .ctl{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}
+ #bxmsg{color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap}
+ #panel{position:fixed;top:62px;right:14px;width:410px;max-height:80vh;z-index:9998;background:var(--card);
+   border:1px solid var(--border);border-radius:16px;box-shadow:0 16px 48px rgba(0,0,0,.6);display:none;
+   overflow:hidden;font-family:system-ui,sans-serif;animation:pin .16s ease}
+ @keyframes pin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+ #phead{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;
+   border-bottom:1px solid var(--border);font-weight:600;color:var(--text);font-size:14px}
+ #phead .x{cursor:pointer;color:var(--muted);font-size:20px;line-height:1}
+ #phead .x:hover{color:var(--text)}
+ #pc{padding:14px 16px;max-height:68vh;overflow:auto;color:#cfd3ea;font-size:13px;line-height:1.6}
+ #pc b{color:var(--accent)}#pc i{color:var(--muted)}
 </style>
 <div id="bx">
-  <input id="addin" style="flex:1;min-width:220px" placeholder="talk to your brain… (e.g. I started learning piano)"/>
-  <button class="p" onclick="bAdd()">Add</button>
-  <input id="qin" placeholder="search…" style="width:150px"/>
-  <label style="color:#9aa;font-size:12px"><input type="checkbox" id="qsem"/> semantic</label>
-  <button onclick="bQuery()">Search</button>
-  <input id="cin" placeholder="context topic…" style="width:130px"/>
-  <button onclick="bContext()">Context</button>
-  <input id="askin" placeholder="ask a question…" style="width:150px"/>
-  <button onclick="bAsk()">Ask</button>
-  <button onclick="bSynth()">Synthesize</button>
-  <button onclick="bReorg()">Reorganize</button>
-  <button onclick="bStatus()">Status</button>
-  <button onclick="bDigest()">Digest</button>
-  <button onclick="bTree()">Tree</button>
-  <a href="?view=2d" style="color:#9aa;font-size:12px;align-self:center">2D</a>
-  <a href="?view=3d" style="color:#9aa;font-size:12px;align-self:center">3D</a>
-  <label style="color:#9aa;font-size:12px;align-self:center">min w
-    <input type="range" id="mw" min="0" max="1" step="0.05" style="width:90px;vertical-align:middle" onchange="setMin(this.value)"/>
-    <span id="mwv">0</span></label>
+  <span class="brand">🧠 <b>brain</b></span>
+  <input id="addin" class="inp" style="flex:1;min-width:160px" placeholder="add a thought…"/>
+  <button class="btn primary" onclick="bAdd()">Add</button>
+  <span class="sep"></span>
+  <input id="askin" class="inp" style="width:130px" placeholder="ask…"/>
+  <button class="btn primary" onclick="bAsk()">Ask</button>
+  <input id="qin" class="inp" style="width:100px" placeholder="search…"/>
+  <label class="ctl"><input type="checkbox" id="qsem"/>sem</label>
+  <button class="btn" onclick="bQuery()">Search</button>
+  <input id="cin" class="inp" style="width:100px" placeholder="context…"/>
+  <button class="btn" onclick="bContext()">Context</button>
+  <span class="sep"></span>
+  <button class="btn" onclick="bDigest()">Digest</button>
+  <button class="btn" onclick="bStatus()">Status</button>
+  <button class="btn" onclick="bTree()">Tree</button>
+  <button class="btn" onclick="bSynth()">Synthesize</button>
+  <button class="btn" onclick="bReorg()">Reorganize</button>
+  <span class="sep"></span>
+  <span class="seg"><a href="?view=2d" id="t2d">2D</a><a href="?view=3d" id="t3d">3D</a></span>
+  <label class="ctl">min<input type="range" id="mw" min="0" max="1" step="0.05" style="width:72px" onchange="setMin(this.value)"/></label>
   <span id="bxmsg"></span>
 </div>
-<div id="panel"><span class="close" onclick="document.getElementById('panel').style.display='none'">✕</span><div id="pc"></div></div>
+<div id="panel">
+  <div id="phead"><span id="ptitle"></span><span class="x" onclick="document.getElementById('panel').style.display='none'">&times;</span></div>
+  <div id="pc"></div>
+</div>
 <script>
 const _V="%(fp)s", $=id=>document.getElementById(id);
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-function show(t,b){$('pc').innerHTML='<h4>'+t+'</h4>'+b;$('panel').style.display='block';}
+function show(t,b){$('ptitle').innerHTML=t;$('pc').innerHTML=b;$('panel').style.display='block';}
 function msg(m){$('bxmsg').textContent=m;}
 async function bAdd(){const i=$('addin'),t=i.value.trim();if(!t)return;msg('thinking…');
  try{const j=await (await fetch('/add',{method:'POST',body:t})).json();
@@ -176,7 +199,8 @@ window.brainNodeClick=async id=>{ if(!id)return; showNode(await (await fetch('/n
    network.on('click',p=>{ if(p.nodes&&p.nodes[0]) window.brainNodeClick(p.nodes[0]); }); }
  else setTimeout(hook2D,300); })();
 function setMin(v){const u=new URL(location);u.searchParams.set('min',v);location=u;}
-(function(){const u=new URL(location),m=u.searchParams.get('min');if(m){$('mw').value=m;$('mwv').textContent=m;}})();
+(function(){const u=new URL(location),m=u.searchParams.get('min');if(m)$('mw').value=m;
+ const tv=u.searchParams.get('view')==='3d'?'t3d':'t2d';const e=$(tv);if(e)e.classList.add('on');})();
 ['addin','qin','cin','askin'].forEach((id,k)=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')[bAdd,bQuery,bContext,bAsk][k]();}));
 setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim();if(v&&v!==_V)location.reload();}catch(e){}},%(ms)d);
 </script>

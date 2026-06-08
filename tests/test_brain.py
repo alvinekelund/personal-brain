@@ -179,7 +179,7 @@ class ServerTests(BrainTestCase):
         self.assertIn("GRAPH", html)
         self.assertIn("/version", html)            # polls for changes
         self.assertIn("location.reload", html)     # reloads on change
-        self.assertIn("talk to your brain", html)  # in-page add box
+        self.assertIn('id="addin"', html)          # in-page add box
         self.assertIn("/add", html)                # posts new content
         self.assertIn("/query", html)              # full feature set wired in
         self.assertIn("/context", html)

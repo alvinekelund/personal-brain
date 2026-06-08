@@ -397,27 +397,39 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
     return node_ids, edge_ids
 
 
-def embed_nodes(conn, node_ids) -> int:
-    """Best-effort: compute & store embeddings for nodes that lack one.
+def embed_nodes(conn, node_ids, workers: int = 8) -> int:
+    """Best-effort: compute & store embeddings for nodes that lack one, embedding
+    in parallel (network-bound) for speed. DB writes stay on the calling thread.
 
-    Lets semantic search work right after `brain add` without a manual reindex.
     Embeddings are an optimization, not required for ingestion, so per-node
-    failures (offline, API error) are swallowed. Returns the count embedded.
+    failures are swallowed. Returns the count embedded.
     """
+    from concurrent.futures import ThreadPoolExecutor
     from brain import db
 
     if not llm.have_key():
         return 0
-    done = 0
+    todo = []
     for nid in node_ids:
         node = db.get_node(conn, nid)
-        if not node or node["embedding"]:
-            continue
+        if node and not node["embedding"]:
+            todo.append((nid, f"{node['name']}. {node['content'] or ''}"))
+    if not todo:
+        return 0
+
+    def fetch(item):
+        nid, text = item
         try:
-            db.set_embedding(conn, nid, llm.embed(f"{node['name']}. {node['content'] or ''}"))
-            done += 1
+            return nid, llm.embed(text)
         except Exception:
-            continue
+            return nid, None
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=min(workers, len(todo))) as ex:
+        for nid, vec in ex.map(fetch, todo):  # DB writes on the main thread
+            if vec:
+                db.set_embedding(conn, nid, vec)
+                done += 1
     if done:
         conn.commit()
     return done
