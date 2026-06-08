@@ -778,6 +778,21 @@ class GraphTests(BrainTestCase):
         self.assertIn("Football", res["sources"])        # the match is a source
         self.assertIn("Bjorn", captured["p"])            # neighbor pulled into context
 
+    def test_answer_question_uses_history(self):
+        db.add_node(self.conn, "Aalto University", type_="organization",
+                    content="where Alvin studies")
+        self.conn.commit()
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "In Espoo.")[1]
+        try:
+            graph.answer_question(self.conn, "and where is it?",
+                                  history=[{"q": "where does he study", "a": "Aalto University"}])
+        finally:
+            llm.generate = orig
+        self.assertIn("Conversation so far", captured["p"])   # prior turn folded in
+        self.assertIn("Aalto", captured["p"])                 # retrieval used the history
+
     def test_synthesize_context_is_importance_ordered(self):
         nodes = {
             "1": {"name": "Trivial detail", "type": "concept", "content": "x",

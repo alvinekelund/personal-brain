@@ -41,8 +41,8 @@ def api_query(conn, q, semantic):
              "content": (r["content"] or "")[:140]} for r in res]
 
 
-def api_ask(conn, q):
-    return graph.answer_question(conn, q) if q else {"answer": "", "sources": []}
+def api_ask(conn, q, history=None):
+    return graph.answer_question(conn, q, history=history) if q else {"answer": "", "sources": []}
 
 
 def api_context(conn, topic):
@@ -145,9 +145,13 @@ async function bQuery(){const q=$('qin').value.trim();if(!q)return;const sem=$('
  show('Search: '+esc(q), r.map(x=>'• ['+x.type+'] '+esc(x.name)+(x.score!=null?'  ('+x.score+')':'')+'\\n   '+esc(x.content)).join('\\n')||'(no results)');}
 async function bContext(){const t=$('cin').value.trim();if(!t)return;show('Context: '+esc(t),'synthesising…');
  const j=await (await fetch('/context?topic='+encodeURIComponent(t))).json();show('Context: '+esc(t), esc(j.doc));}
-async function bAsk(){const q=$('askin').value.trim();if(!q)return;show('Q: '+esc(q),'thinking…');
- const j=await (await fetch('/ask?q='+encodeURIComponent(q))).json();
- show('Q: '+esc(q), esc(j.answer)+'\\n\\nsources: '+esc((j.sources||[]).join(', ')));}
+let chat=[];
+function renderChat(){ show('Ask', chat.map(c=>'<b>Q:</b> '+esc(c.q)+'<br><b>A:</b> '+esc(c.a)+(c.src?'<br><span style="color:#789">sources: '+esc(c.src)+'</span>':'')).join('<br><br>')); }
+async function bAsk(){const q=$('askin').value.trim();if(!q)return;$('askin').value='';
+ chat.push({q:q,a:'thinking…',src:''}); renderChat();
+ try{ const j=await (await fetch('/ask',{method:'POST',body:JSON.stringify({q:q,history:chat.slice(0,-1).map(c=>({q:c.q,a:c.a}))})})).json();
+   chat[chat.length-1].a=j.answer; chat[chat.length-1].src=(j.sources||[]).join(', '); }
+ catch(e){ chat[chat.length-1].a='error'; } renderChat(); }
 async function bSynth(){show('Synthesize','working…');const j=await (await fetch('/synthesize',{method:'POST'})).json();
  show('Synthesize',(j.made||[]).map(m=>'• '+esc(m.source)+' --'+m.relation+'--> '+esc(m.target)).join('\\n')||'(no new links)');setTimeout(()=>location.reload(),700);}
 async function bReorg(){show('Reorganize','working…');const j=await (await fetch('/reorganize',{method:'POST'})).json();
@@ -244,6 +248,14 @@ def make_handler(interval: float):
                         return
                     nids, eids = extract.ingest(conn, text, source="web", user=config.get_user())
                     self._json({"nodes": len(nids), "edges": len(eids)})
+                elif path == "/ask":
+                    length = int(self.headers.get("Content-Length", 0) or 0)
+                    body = self.rfile.read(length).decode("utf-8", "replace")
+                    try:
+                        data = json.loads(body) if body else {}
+                    except ValueError:
+                        data = {}
+                    self._json(api_ask(conn, (data.get("q") or "").strip(), data.get("history") or []))
                 elif path == "/synthesize":
                     self._json({"made": graph.connect_isolated_nodes(conn)})
                 elif path == "/reorganize":

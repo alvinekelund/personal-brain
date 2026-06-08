@@ -221,19 +221,26 @@ def semantic_search(conn, query_vector: list, min_weight: float = 0.0, limit: in
     return scored[:limit]
 
 
-def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0) -> dict:
+def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
+                    history: list | None = None) -> dict:
     """Answer a natural-language question from the brain: retrieve the most
     relevant nodes (semantic, falling back to keyword) and have the LLM answer
-    using only them. Accessing them reinforces them. Returns {answer, sources}."""
+    using only them. Accessing them reinforces them. Returns {answer, sources}.
+
+    history (optional [{q, a}, ...]) makes it conversational — the prior turn is
+    folded into retrieval and the prompt so follow-ups ("...and where?") resolve.
+    """
+    history = history or []
+    retrieval_q = (history[-1].get("q", "") + " " + question).strip() if history else question
     seeds = []
     try:
         if llm.have_key():
-            seeds = [r for _, r in semantic_search(conn, llm.embed(question),
+            seeds = [r for _, r in semantic_search(conn, llm.embed(retrieval_q),
                                                    min_weight=min_weight, limit=k)]
     except Exception:
         seeds = []
     if not seeds:
-        seeds = db.search_nodes(conn, question, min_weight=min_weight)[:k]
+        seeds = db.search_nodes(conn, retrieval_q, min_weight=min_weight)[:k]
     if not seeds:
         return {"answer": "I don't have anything on that yet.", "sources": []}
 
@@ -255,10 +262,14 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0) ->
         lines.append("Related:")
         lines += [f"- {o['name']} ({o['type']}): {o['content'] or ''}"
                   for o in list(neighbors.values())[:12]]
+    convo = ""
+    if history:
+        convo = "Conversation so far:\n" + "\n".join(
+            f"Q: {h.get('q', '')}\nA: {h.get('a', '')}" for h in history[-3:]) + "\n\n"
     prompt = (
         "Answer the question using ONLY the following knowledge about the person. "
         "If the answer isn't contained in it, say you don't have that. Be concise and direct.\n\n"
-        f"Knowledge:\n{chr(10).join(lines)}\n\nQuestion: {question}"
+        f"{convo}Knowledge:\n{chr(10).join(lines)}\n\nQuestion: {question}"
     )
     for n in seeds:  # asking accesses these memories → reinforce them
         db.touch_node(conn, n["id"])
