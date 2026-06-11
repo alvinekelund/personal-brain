@@ -1124,6 +1124,51 @@ class LLMRetryTests(unittest.TestCase):
         cm.exception.close()  # avoid ResourceWarning on GC
         self.assertEqual(calls["n"], 1)  # 4xx not retried
 
+    def test_429_waits_out_the_quota_window_then_succeeds(self):
+        import urllib.error as ue
+        calls, slept = {"n": 0}, []
+        body = json.dumps({"error": {"details": [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "18s"}
+        ]}}).encode()
+        def rate_limited(req, timeout):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ue.HTTPError("u", 429, "quota", {}, io.BytesIO(body))
+            return self._FakeResp()
+        orig_sleep = llm.time.sleep
+        llm.time.sleep = slept.append
+        try:
+            self.assertEqual(self._run(rate_limited), {"ok": 1})
+        finally:
+            llm.time.sleep = orig_sleep
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(slept, [18.0])  # honored the API's own retryDelay
+
+    def test_429_exhausts_retries_then_raises(self):
+        import urllib.error as ue
+        calls, slept = {"n": 0}, []
+        def always_limited(req, timeout):
+            calls["n"] += 1
+            raise ue.HTTPError("u", 429, "quota", {}, io.BytesIO(b"{}"))
+        orig_sleep = llm.time.sleep
+        llm.time.sleep = slept.append
+        try:
+            with self.assertRaises(ue.HTTPError) as cm:
+                self._run(always_limited)
+        finally:
+            llm.time.sleep = orig_sleep
+        cm.exception.close()
+        self.assertEqual(calls["n"], llm.RETRIES + 1)  # retried to the cap
+        self.assertEqual(len(slept), llm.RETRIES)      # no flat-backoff double sleep
+
+    def test_retry_delay_parsing(self):
+        body = '{"error": {"details": [{"@type": "x/RetryInfo", "retryDelay": "7s"}]}}'
+        self.assertEqual(llm._retry_delay(body, 0), 7.0)
+        self.assertEqual(llm._retry_delay("not json", 0), llm.RATE_LIMIT_BACKOFF)
+        self.assertEqual(llm._retry_delay("{}", 1), llm.RATE_LIMIT_BACKOFF * 2)
+        huge = '{"error": {"details": [{"@type": "x/RetryInfo", "retryDelay": "999s"}]}}'
+        self.assertEqual(llm._retry_delay(huge, 0), llm.RATE_LIMIT_MAX_WAIT)
+
 
 class ParseJsonTests(unittest.TestCase):
     def test_plain(self):

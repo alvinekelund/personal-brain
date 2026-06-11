@@ -14,17 +14,37 @@ DEFAULT_MODEL = "gemini-2.5-flash"
 EMBED_MODEL = "gemini-embedding-001"
 RETRIES = 2          # extra attempts on transient failures
 BACKOFF = 1.5        # seconds, multiplied by attempt number
+RATE_LIMIT_BACKOFF = 20.0   # seconds for a 429 when the API names no retryDelay
+RATE_LIMIT_MAX_WAIT = 65.0  # cap on a server-suggested retryDelay
+
+
+def _retry_delay(body: str, attempt: int) -> float:
+    """Seconds to wait after a 429. Honors the RetryInfo the API sends
+    (e.g. "retryDelay": "18s"); falls back to a flat backoff that outlasts
+    a per-minute quota window."""
+    try:
+        for detail in json.loads(body)["error"]["details"]:
+            if detail.get("@type", "").endswith("RetryInfo"):
+                return min(float(detail["retryDelay"].rstrip("s")), RATE_LIMIT_MAX_WAIT)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return RATE_LIMIT_BACKOFF * (attempt + 1)
 
 
 def _request(req, timeout):
-    """POST and parse JSON, retrying transient failures (5xx, dropped
-    connections, timeouts). 4xx (bad key/request) fail fast — no point retrying.
+    """POST and parse JSON, retrying transient failures: 5xx, dropped
+    connections, timeouts, and 429 rate limits (waiting out the quota window —
+    free-tier keys allow only a handful of requests per minute). Other 4xx
+    (bad key/request) fail fast — no point retrying.
     """
     for attempt in range(RETRIES + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < RETRIES:
+                time.sleep(_retry_delay(e.read().decode(errors="replace"), attempt))
+                continue
             if e.code < 500 or attempt == RETRIES:
                 raise
         except OSError:  # URLError, ConnectionError (incl. RemoteDisconnected), timeout
@@ -125,6 +145,12 @@ def generate(
             hint = (
                 "\nHint: Google rejected the configured GEMINI_API_KEY. Check it at "
                 "https://aistudio.google.com/apikey and update ~/.personal-brain/.env"
+            )
+        elif e.code == 429:
+            hint = (
+                "\nHint: rate limited even after waiting and retrying — a free-tier "
+                "key allows only a few requests per minute. Wait a minute and retry, "
+                "or use a key from a billed project."
             )
         raise RuntimeError(f"Gemini API error {e.code}: {detail}{hint}") from None
     except OSError as e:
