@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/alvinekelund/personal-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/alvinekelund/personal-brain/actions/workflows/ci.yml)
 
-A local-first personal knowledge graph. Paste text, a URL, or a file — Gemini extracts entities and relationships automatically. Every node decays via an Ebbinghaus forgetting curve; accessing it resets the clock. The graph is explorable as an interactive Pyvis visualization, and any slice of it can be synthesized into a structured context document for pasting into an AI conversation.
+A local-first personal knowledge graph that doubles as a memory layer for AI agents. Paste text, a URL, or a file — Gemini extracts entities and relationships automatically. Every node decays via an Ebbinghaus forgetting curve; accessing it resets the clock. The graph is explorable as an interactive Pyvis visualization, any slice of it can be synthesized into a structured context document, and a built-in MCP server lets Claude Code, Claude Desktop, or any MCP client read and write the brain mid-conversation.
 
 No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
@@ -23,6 +23,8 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 **Context injection** — `brain context "ML internships"` seeds from keyword → semantic → whole-brain (in that order), BFS-traverses (hub-aware), then calls Gemini to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
 
 **Synthesis** — `brain synthesize` finds isolated nodes and connects them to the graph, surfacing relationships Gemini notices across your knowledge.
+
+**Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
 
 ---
 
@@ -102,6 +104,10 @@ brain ask "where do I want to study?"        # Q&A — answers from your brain, 
 brain context "machine learning"
 brain context > context.md
 
+# Agent memory — register the MCP server once, then Claude remembers you
+claude mcp add brain -- brain mcp     # Claude Code
+brain mcp                             # or point any MCP client at this (stdio)
+
 # Hierarchy
 brain tree                       # print the person-rooted hierarchy
 brain reorganize                 # retrofit existing flat nodes into the hierarchy
@@ -176,6 +182,7 @@ Query / Output
   → brain query   → keyword search + weight sort
   → brain context → BFS traversal → Gemini synthesis
   → brain show    → Pyvis HTML graph
+  → brain mcp     → MCP server (stdio) → remember/search/ask/context/digest for agents
 ```
 
 ---
@@ -191,6 +198,7 @@ Query / Output
 | `brain/llm.py` | Gemini REST client (generate + embed) over stdlib urllib, with retries |
 | `brain/visualize.py` | Pyvis interactive graph |
 | `brain/server.py` | Live auto-reloading web view (`brain serve`) |
+| `brain/mcp.py` | MCP server over stdio (stdlib JSON-RPC, no SDK) — agent memory tools |
 | `brain/portability.py` | JSON export / import |
 | `cli.py` | Click CLI entry point |
 

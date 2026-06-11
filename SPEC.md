@@ -203,11 +203,12 @@ brain reinforce <id>          # manually boost a node's weight
 - Semantic search (vs. keyword search)
 - URL scraping ingestion
 
-### Phase 3 — Ambient ingestion
+### Phase 3 — Agent integration + ambient ingestion
+- MCP server — **built** (`brain mcp`): stdio JSON-RPC over pure stdlib, exposes
+  remember/search/ask/context/digest to Claude Code & any MCP client
 - Clipboard monitor daemon (runs in background, watches clipboard)
 - Browser extension (logs visited pages + time spent)
 - Import from Obsidian vault
-- MCP server (expose graph to any AI via MCP protocol)
 
 ---
 

@@ -113,6 +113,18 @@ def serve(port, interval, no_open):
     server.serve(port=port, interval=interval, open_browser=not no_open)
 
 
+# ── mcp ───────────────────────────────────────────────────────────────────────
+
+@cli.command()
+def mcp():
+    """Run the MCP server (stdio) — plug the brain into Claude Code & other agents.
+
+    Register it once with: claude mcp add brain -- brain mcp
+    """
+    from brain import mcp as mcp_server
+    mcp_server.serve()
+
+
 # ── query ─────────────────────────────────────────────────────────────────────
 
 @cli.command()
