@@ -26,6 +26,8 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
 
+**Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt.
+
 ---
 
 ## Half-lives by node type
@@ -107,6 +109,11 @@ brain context > context.md
 # Agent memory — register the MCP server once, then Claude remembers you
 claude mcp add brain -- brain mcp     # Claude Code
 brain mcp                             # or point any MCP client at this (stdio)
+
+# Ambient capture — add as a Claude Code SessionEnd hook (~/.claude/settings.json)
+# and durable facts from each session flow into the graph automatically:
+#   {"hooks": {"SessionEnd": [{"hooks": [{"type": "command", "async": true,
+#     "command": "python /path/to/integrations/claude_code_capture.py"}]}]}}
 
 # Hierarchy
 brain tree                       # print the person-rooted hierarchy
@@ -199,6 +206,7 @@ Query / Output
 | `brain/visualize.py` | Pyvis interactive graph |
 | `brain/server.py` | Live auto-reloading web view (`brain serve`) |
 | `brain/mcp.py` | MCP server over stdio (stdlib JSON-RPC, no SDK) — agent memory tools |
+| `integrations/claude_code_capture.py` | Claude Code SessionEnd hook — ambient memory capture |
 | `brain/portability.py` | JSON export / import |
 | `cli.py` | Click CLI entry point |
 
