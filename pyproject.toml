@@ -24,6 +24,9 @@ dependencies = [
     "networkx>=3.0",
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
+    # TLS trust for the Gemini calls: the python.org framework build ships without
+    # system CA certs, so stdlib urllib fails CERTIFICATE_VERIFY_FAILED without this.
+    "certifi>=2024.0.0",
 ]
 
 [project.urls]

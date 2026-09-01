@@ -5,6 +5,7 @@ talk to the generativelanguage REST API directly. Only the standard library is u
 """
 import json
 import os
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -31,6 +32,17 @@ def _retry_delay(body: str, attempt: int) -> float:
     return RATE_LIMIT_BACKOFF * (attempt + 1)
 
 
+def ssl_context() -> ssl.SSLContext:
+    """TLS trust for every API call. The python.org framework build ships with an
+    empty CA store, so a plain urlopen fails CERTIFICATE_VERIFY_FAILED; certifi's
+    bundle fixes that when installed, else fall back to the system default."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _request(req, timeout):
     """POST and parse JSON, retrying transient failures: 5xx, dropped
     connections, timeouts, and 429 rate limits (waiting out the quota window —
@@ -39,7 +51,7 @@ def _request(req, timeout):
     """
     for attempt in range(RETRIES + 1):
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < RETRIES:

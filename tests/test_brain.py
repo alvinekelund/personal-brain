@@ -58,12 +58,69 @@ class BrainTestCase(unittest.TestCase):
         config.CONFIG_PATH = self._orig_config_path
 
     def _age(self, node_id, days):
-        """Backdate a node's last_accessed by `days` days."""
+        """Backdate a node's clocks (last_accessed AND last_decayed) by `days` days,
+        i.e. 'this node was last seen and last decayed `days` ago'."""
         self.conn.execute(
-            "UPDATE nodes SET last_accessed = ? WHERE id = ?",
-            (time.time() - days * DAY, node_id),
+            "UPDATE nodes SET last_accessed = ?, last_decayed = ? WHERE id = ?",
+            (time.time() - days * DAY, time.time() - days * DAY, node_id),
         )
         self.conn.commit()
+
+    def _age_edge(self, edge_id, days):
+        self.conn.execute(
+            "UPDATE edges SET last_reinforced = ?, last_decayed = ? WHERE id = ?",
+            (time.time() - days * DAY, time.time() - days * DAY, edge_id),
+        )
+        self.conn.commit()
+
+
+class DecayClockTests(BrainTestCase):
+    """Decay must be a function of elapsed time, not of how often the CLI runs."""
+
+    def test_run_decay_is_idempotent(self):
+        nid = db.add_node(self.conn, "Thing", type_="concept", importance=0.3)
+        a = db.add_node(self.conn, "A", type_="concept")
+        eid = db.add_edge(self.conn, nid, a, "relates_to")
+        self._age(nid, 30)
+        self._age_edge(eid, 30)
+        decay.run_decay(self.conn)
+        w1 = db.get_node(self.conn, nid)["weight"]
+        e1 = self.conn.execute("SELECT weight FROM edges WHERE id=?", (eid,)).fetchone()[0]
+        for _ in range(10):                       # ten more CLI calls in the same second
+            decay.run_decay(self.conn)
+        self.assertAlmostEqual(db.get_node(self.conn, nid)["weight"], w1, places=4)
+        self.assertAlmostEqual(self.conn.execute("SELECT weight FROM edges WHERE id=?", (eid,)).fetchone()[0], e1, places=4)
+        self.assertLess(w1, 1.0)                   # …but time did decay it once
+        self.assertLess(e1, 1.0)
+
+    def test_part_of_edges_are_clamped_never_pruned(self):
+        a = db.add_node(self.conn, "Leaf", type_="concept")
+        cat = db.add_node(self.conn, "Area", type_="category")
+        spine = db.add_edge(self.conn, a, cat, "part_of")
+        cross = db.add_edge(self.conn, a, cat, "relates_to")
+        self._age_edge(spine, 3650)
+        self._age_edge(cross, 3650)
+        r = decay.run_decay(self.conn)
+        self.assertEqual(r["edges_pruned"], 1)
+        rows = {row[0]: row[1] for row in self.conn.execute("SELECT relation, weight FROM edges")}
+        self.assertIn("part_of", rows)
+        self.assertNotIn("relates_to", rows)
+        self.assertAlmostEqual(rows["part_of"], decay.EDGE_MIN_WEIGHT, places=6)
+
+    def test_access_resets_the_clock(self):
+        nid = db.add_node(self.conn, "Thing", type_="concept", importance=0.0)
+        self._age(nid, 60)
+        decay.run_decay(self.conn)
+        self.assertLess(db.get_node(self.conn, nid)["weight"], 0.6)
+        db.touch_node(self.conn, nid)             # accessed now → weight 1.0, clock reset
+        decay.run_decay(self.conn)
+        self.assertAlmostEqual(db.get_node(self.conn, nid)["weight"], 1.0, places=3)
+
+    def test_migration_backfills_clock(self):
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(nodes)")}
+        self.assertIn("last_decayed", cols)
+        nid = db.add_node(self.conn, "X", type_="concept")
+        self.assertGreater(db.get_node(self.conn, nid)["last_decayed"], 0)   # stamped at insert
 
 
 class DecayTests(BrainTestCase):
@@ -1174,7 +1231,7 @@ class LLMRetryTests(unittest.TestCase):
 
     def test_retries_transient_then_succeeds(self):
         calls = {"n": 0}
-        def flaky(req, timeout):
+        def flaky(req, timeout, **kw):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise ConnectionResetError("dropped")  # transient (OSError)
@@ -1185,7 +1242,7 @@ class LLMRetryTests(unittest.TestCase):
     def test_4xx_fails_fast_without_retry(self):
         import urllib.error as ue
         calls = {"n": 0}
-        def bad_key(req, timeout):
+        def bad_key(req, timeout, **kw):
             calls["n"] += 1
             raise ue.HTTPError("u", 400, "bad", {}, io.BytesIO(b"bad"))
         with self.assertRaises(ue.HTTPError) as cm:
@@ -1199,7 +1256,7 @@ class LLMRetryTests(unittest.TestCase):
         body = json.dumps({"error": {"details": [
             {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "18s"}
         ]}}).encode()
-        def rate_limited(req, timeout):
+        def rate_limited(req, timeout, **kw):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise ue.HTTPError("u", 429, "quota", {}, io.BytesIO(body))
@@ -1216,7 +1273,7 @@ class LLMRetryTests(unittest.TestCase):
     def test_429_exhausts_retries_then_raises(self):
         import urllib.error as ue
         calls, slept = {"n": 0}, []
-        def always_limited(req, timeout):
+        def always_limited(req, timeout, **kw):
             calls["n"] += 1
             raise ue.HTTPError("u", 429, "quota", {}, io.BytesIO(b"{}"))
         orig_sleep = llm.time.sleep

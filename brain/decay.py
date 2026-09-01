@@ -2,7 +2,8 @@ import math
 import time
 
 EDGE_BASE_HALF_LIFE = 90.0   # days for a once-seen edge
-EDGE_MIN_WEIGHT = 0.05       # below this, delete the edge
+EDGE_MIN_WEIGHT = 0.05       # below this, delete the edge — except the part_of spine, which is clamped
+STRUCTURAL_RELATIONS = ("part_of",)   # hierarchy edges: may fade, never vanish
 ARCHIVE_THRESHOLD = 0.10     # weight below this → archived
 IMPORTANCE_GAIN = 4.0        # important nodes decay up to (1+gain)x slower
 IMPORTANCE_FLOOR = 0.15      # weight never drops below importance * this
@@ -84,7 +85,7 @@ def run_decay(conn) -> dict:
     Returns counts of updated / archived / deleted nodes + edges pruned.
     """
     nodes = conn.execute(
-        "SELECT id, weight, last_accessed, half_life_days, archived, importance FROM nodes"
+        "SELECT id, weight, last_accessed, last_decayed, half_life_days, archived, importance FROM nodes"
     ).fetchall()
 
     updated = archived = deleted = edges_pruned = 0
@@ -98,41 +99,45 @@ def run_decay(conn) -> dict:
                 deleted += 1
             continue
 
-        new_w = current_weight(
-            n["weight"], n["last_accessed"], n["half_life_days"], n["importance"]
-        )
+        # The stored weight is current as of `last_decayed` (or the later access
+        # that reset it), so decay only the interval since then. Calling decay
+        # twice in a row is then a no-op instead of a second full decay.
+        since = max(n["last_decayed"], n["last_accessed"])
+        new_w = current_weight(n["weight"], since, n["half_life_days"], n["importance"])
         new_w = max(0.0, min(1.0, new_w))
 
         if new_w < 0.10:
             conn.execute(
-                "UPDATE nodes SET weight = ?, archived = 1 WHERE id = ?",
-                (new_w, n["id"]),
+                "UPDATE nodes SET weight = ?, archived = 1, last_decayed = ? WHERE id = ?",
+                (new_w, now, n["id"]),
             )
             archived += 1
         else:
             conn.execute(
-                "UPDATE nodes SET weight = ? WHERE id = ?",
-                (new_w, n["id"]),
+                "UPDATE nodes SET weight = ?, last_decayed = ? WHERE id = ?",
+                (new_w, now, n["id"]),
             )
             updated += 1
 
-    # edge decay
+    # edge decay — same clock discipline; the part_of spine is clamped, never deleted
     edges = conn.execute(
-        "SELECT id, weight, last_reinforced, reinforcement_count FROM edges"
+        "SELECT id, weight, last_reinforced, last_decayed, reinforcement_count, relation FROM edges"
     ).fetchall()
 
     for e in edges:
         hl = edge_half_life(e["reinforcement_count"])
-        days_elapsed = (now - e["last_reinforced"]) / 86400.0
+        since = max(e["last_decayed"], e["last_reinforced"])
+        days_elapsed = max(0.0, (now - since) / 86400.0)
         new_w = e["weight"] * 0.5 ** (days_elapsed / hl)
 
-        if new_w < EDGE_MIN_WEIGHT:
+        if new_w < EDGE_MIN_WEIGHT and e["relation"] not in STRUCTURAL_RELATIONS:
             conn.execute("DELETE FROM edges WHERE id = ?", (e["id"],))
             edges_pruned += 1
         else:
             conn.execute(
-                "UPDATE edges SET weight = ? WHERE id = ?",
-                (new_w, e["id"]),
+                "UPDATE edges SET weight = ?, last_decayed = ? WHERE id = ?",
+                (max(new_w, EDGE_MIN_WEIGHT) if e["relation"] in STRUCTURAL_RELATIONS else new_w,
+                 now, e["id"]),
             )
 
     conn.commit()

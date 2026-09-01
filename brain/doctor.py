@@ -76,6 +76,32 @@ def check_db(db_path: Path = DB_PATH, now: float | None = None) -> Check:
     return Check("graph", status, f"{active} nodes · last ingest {age:.0f}h ago")
 
 
+API_PROBE_URL = "https://generativelanguage.googleapis.com/"
+
+
+def _default_probe():
+    import urllib.request
+    urllib.request.urlopen(API_PROBE_URL, timeout=6, context=llm.ssl_context())
+
+
+def check_api(probe=None) -> Check:
+    """Can we actually complete a TLS handshake with the Gemini host? A missing
+    CA bundle (python.org builds) fails here long before any key is checked —
+    exactly what silently broke every ingest after the Sep 2026 venv move."""
+    import urllib.error
+    try:
+        (probe or _default_probe)()
+    except urllib.error.HTTPError:
+        return Check("gemini-api", "ok", "TLS handshake ok")   # 404 on / is fine: we reached it
+    except Exception as e:
+        msg = str(e)
+        if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate" in msg.lower():
+            return Check("gemini-api", "fail", f"TLS trust broken ({type(e).__name__}) — "
+                         f"run: {DATA_DIR}/venv/bin/pip install certifi")
+        return Check("gemini-api", "warn", f"unreachable: {msg[:80]} (offline?)")
+    return Check("gemini-api", "ok", "reachable")
+
+
 def check_key() -> Check:
     return (Check("gemini-key", "ok", "present") if llm.have_key()
             else Check("gemini-key", "warn", "no GEMINI_API_KEY — brain add / capture / ask are disabled"))
@@ -197,8 +223,8 @@ def check_wiring(settings: Path | None = CLAUDE_SETTINGS, claude_json: Path | No
 def run(root: Path, today: date | None = None, now: float | None = None,
         db_path: Path = DB_PATH, expected_bin: Path = EXPECTED_BIN,
         settings: Path | None = CLAUDE_SETTINGS, claude_json: Path | None = CLAUDE_JSON,
-        tasks_dir: Path | None = SCHEDULED_TASKS) -> list[Check]:
-    checks = [check_binary(expected_bin), check_db(db_path, now), check_key()]
+        tasks_dir: Path | None = SCHEDULED_TASKS, api_probe=None) -> list[Check]:
+    checks = [check_binary(expected_bin), check_db(db_path, now), check_key(), check_api(api_probe)]
     checks += check_vault(root, today, now)
     checks += check_wiring(settings, claude_json, tasks_dir)
     return checks

@@ -60,8 +60,12 @@ class DoctorTests(unittest.TestCase):
         llm.have_key = self._orig_have_key
 
     def run_doctor(self, **kw):
+        import urllib.error
+        def reachable():
+            raise urllib.error.HTTPError("https://x/", 404, "nf", {}, None)
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
-                    settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks)
+                    settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
+                    api_probe=reachable)
         args.update(kw)
         return doctor.run(**args)
 
@@ -69,7 +73,7 @@ class DoctorTests(unittest.TestCase):
         loops.add(self.root, "A", "2026-09-09", "alvin", "jobs", "n", today=TODAY, commit=False)
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "gemini-key", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "gemini-key", "gemini-api", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -125,6 +129,18 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(by_name(self.run_doctor())["scheduled-tasks"].status, "ok")
         self.assertEqual(doctor._paths_in("reinstall: ~/x/brain and /y/python3 and /z/other"),
                          [str(Path("~/x/brain").expanduser()), "/y/python3"])
+
+    def test_api_probe_tls_failure_is_a_failure_with_fix(self):
+        import ssl
+        def bad_tls():
+            raise ssl.SSLCertVerificationError("certificate verify failed: unable to get local issuer certificate")
+        c = doctor.check_api(bad_tls)
+        self.assertEqual(c.status, "fail")
+        self.assertIn("pip install certifi", c.detail)
+        def offline():
+            raise OSError("Network is unreachable")
+        self.assertEqual(doctor.check_api(offline).status, "warn")
+        self.assertEqual(by_name(self.run_doctor())["gemini-api"].status, "ok")
 
     def test_unregistered_mcp_is_a_warning(self):
         self.claude_json.write_text(json.dumps({"mcpServers": {}}))

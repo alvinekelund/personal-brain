@@ -164,6 +164,17 @@ def _migrate(conn):
         conn.execute("ALTER TABLE nodes ADD COLUMN embedding TEXT")
     if "importance" not in node_cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
+    # last_decayed (nodes + edges): the moment the stored weight was last brought
+    # up to date. Decay is time-based from here, so running the CLI ten times a day
+    # no longer compounds ten decays (the bug that dismantled the hierarchy in
+    # Aug-Sep 2026). Backfill = now: existing weights are taken as current.
+    t = time.time()
+    if "last_decayed" not in node_cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN last_decayed REAL NOT NULL DEFAULT 0")
+    conn.execute("UPDATE nodes SET last_decayed = ? WHERE last_decayed = 0", (t,))
+    if "last_decayed" not in existing:
+        conn.execute("ALTER TABLE edges ADD COLUMN last_decayed REAL NOT NULL DEFAULT 0")
+    conn.execute("UPDATE edges SET last_decayed = ? WHERE last_decayed = 0", (t,))
 
 
 def new_id():
@@ -188,6 +199,7 @@ def add_node(conn, name, type_="concept", content="", source="", confidence=0.8,
            VALUES (?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?, ?)""",
         (node_id, name, type_, content, source, t, t, confidence, importance, half_life),
     )
+    conn.execute("UPDATE nodes SET last_decayed = ? WHERE id = ?", (t, node_id))
     return node_id
 
 
@@ -348,6 +360,7 @@ def add_edge(conn, source_id, target_id, relation="relates_to", weight=1.0):
            VALUES (?,?,?,?,?,?,?,1)""",
         (edge_id, source_id, target_id, relation, weight, t, t),
     )
+    conn.execute("UPDATE edges SET last_decayed = ? WHERE id = ?", (t, edge_id))
     return edge_id
 
 

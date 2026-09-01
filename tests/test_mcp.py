@@ -259,8 +259,8 @@ class ToolCallTests(MCPTestCase):
     def test_decay_runs_on_tool_calls(self):
         nid = self.seed("Old meeting", type_="event", importance=0.1)
         conn = db.connect()
-        conn.execute("UPDATE nodes SET last_accessed=? WHERE id=?",
-                     (time.time() - 60 * DAY, nid))
+        conn.execute("UPDATE nodes SET last_accessed=?, last_decayed=? WHERE id=?",
+                     (time.time() - 60 * DAY, time.time() - 60 * DAY, nid))
         conn.commit()
         conn.close()
         call_tool("brain_digest")
