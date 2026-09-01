@@ -7,7 +7,7 @@ from pathlib import Path
 from brain import DB_PATH
 
 HALF_LIVES = {
-    "task":         5.0,      # actionable items — fade fast once irrelevant
+    "task":         5.0,      # LEGACY only (pre-Sep-2026 graphs): new tasks never become nodes — extract.ingest routes them to the vault loop inbox
     "event":        7.0,
     "fact":         21.0,
     "artifact":     30.0,     # documents, slides, files — temporary references

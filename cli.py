@@ -72,11 +72,15 @@ def add(text, file_path, url, source):
         db.ensure_identity_anchor(conn, user)
 
     click.echo("Extracting knowledge...")
+    inbox_before = len(loops.inbox_list(vault.vault_dir()))
     try:
         node_ids, edge_ids = extract.ingest(conn, raw, source=source, user=user)
     except Exception as e:
         click.echo(f"Extraction failed: {e}", err=True)
         sys.exit(1)
+    routed = len(loops.inbox_list(vault.vault_dir())) - inbox_before
+    if routed:
+        click.echo(f"{routed} action item(s) routed to LOOPS-INBOX.md (not the graph) — triage with `brain loop inbox`")
 
     click.echo(f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s).")
     for nid in node_ids[:6]:
@@ -275,7 +279,7 @@ def digest():
         for t in d["top"]:
             click.echo(f"  [{t['type']:8s}] {t['name']}  (imp {t['importance']})")
     if d["tasks"]:
-        click.echo("Open tasks:")
+        click.echo("Open loops (LOOPS.md):")
         for t in d["tasks"]:
             click.echo(f"  - {t}")
     if d["fading"]:
@@ -545,15 +549,43 @@ def loop():
 @click.option("--prio", default=2, show_default=True, type=click.IntRange(1, 3))
 @click.option("--since", default=None, help="Backdate when the loop was really opened.")
 @click.option("--date", "today", default=None, help="Pretend today is YYYY-MM-DD (tests/migration).")
+@click.option("--from-inbox", "from_inbox", type=int, default=None,
+              help="Also remove inbox item N (this loop is its triage).")
 @click.option("--no-commit", is_flag=True)
-def loop_add(title, due, next_, owner, area, prio, since, today, no_commit):
+def loop_add(title, due, next_, owner, area, prio, since, today, from_inbox, no_commit):
     """Open a loop; re-renders NOW.md and commits the vault."""
+    root = _vault_root()
     try:
-        l = loops.add(_vault_root(), title, due, owner, area, next_, prio=prio, since=since,
+        l = loops.add(root, title, due, owner, area, next_, prio=prio, since=since,
                       today=_parse_day(today), commit=not no_commit)
+        if from_inbox is not None:
+            gone = loops.inbox_drop(root, from_inbox)
+            click.echo(f"triaged inbox item {from_inbox}: {gone['text']}")
     except loops.LoopError as e:
         _die(e)
     click.echo(l.to_line())
+
+
+@loop.command("inbox")
+@click.option("--drop", type=int, default=None, help="Discard inbox item N.")
+@click.option("--clear", is_flag=True, help="Discard every inbox item.")
+def loop_inbox(drop, clear):
+    """Show action items the extractor found (triage with `loop add --from-inbox N`)."""
+    root = _vault_root()
+    try:
+        if drop is not None:
+            gone = loops.inbox_drop(root, drop)
+            click.echo(f"dropped: {gone['text']}")
+        if clear:
+            click.echo(f"cleared {loops.inbox_clear(root)} item(s)")
+    except loops.LoopError as e:
+        _die(e)
+    items = loops.inbox_list(root)
+    if not items:
+        click.echo("inbox empty")
+    for i, it in enumerate(items, 1):
+        src = f"  (from {it['source']})" if it["source"] else ""
+        click.echo(f"{i:>3}. {it['date']}  {it['text']}{src}")
 
 
 @loop.command("done")

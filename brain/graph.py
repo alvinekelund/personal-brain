@@ -1,4 +1,5 @@
 """Graph traversal and context synthesis."""
+from pathlib import Path
 import json
 import math
 from collections import deque
@@ -151,19 +152,35 @@ def children_map(conn) -> dict:
     return m
 
 
-def digest(conn, user: str = "", top: int = 6) -> dict:
-    """A quick 'state of your brain': the highest-importance items, open tasks,
-    what's fading, and the life-area balance. Deterministic (no LLM)."""
+def open_loops(loops_root=None) -> list:
+    """Open loops from the vault's LOOPS.md as display strings (the graph is
+    context, not a to-do list — tasks live in the ledger). `loops_root` overrides
+    the configured vault (tests); a missing ledger yields []."""
+    from brain import config, loops
+    root = Path(loops_root) if loops_root is not None else config.vault_dir()
+    try:
+        ledger = loops.load(root)
+    except OSError:
+        return []
+    return [f"{l.title} (due {l.due.isoformat()}, {l.owner}) {l.id}"
+            for l in sorted(ledger.open, key=lambda l: (l.prio, l.due, l.id))]
+
+
+def digest(conn, user: str = "", top: int = 6, loops_root=None) -> dict:
+    """A quick 'state of your brain': the highest-importance items, open loops
+    (from LOOPS.md, not graph nodes), what's fading, and the life-area balance.
+    Deterministic (no LLM)."""
     def imp(n):
         return n["importance"] if "importance" in n.keys() else 0.5
 
+    # legacy task nodes (pre-Sep-2026 graphs) are ignored everywhere: tasks are loops
     nodes = [n for n in db.all_nodes(conn)
-             if n["type"] != "category" and n["name"].lower() != (user or "").lower()]
+             if n["type"] not in ("category", "task") and n["name"].lower() != (user or "").lower()]
     top_nodes = sorted(nodes, key=lambda n: (-imp(n), -n["weight"]))[:top]
     return {
         "top": [{"name": n["name"], "type": n["type"], "importance": round(imp(n), 2)}
                 for n in top_nodes],
-        "tasks": [n["name"] for n in nodes if n["type"] == "task"],
+        "tasks": open_loops(loops_root),
         "fading": decay.at_risk_nodes(conn),
         "areas": category_breakdown(conn, user),
     }

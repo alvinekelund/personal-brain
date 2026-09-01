@@ -37,6 +37,7 @@ from pathlib import Path
 
 SEP = " · "
 LOOPS_FILE = "LOOPS.md"
+INBOX_FILE = "LOOPS-INBOX.md"
 NOW_FILE = "NOW.md"
 START_MARK = "<!-- loops:start -->"
 END_MARK = "<!-- loops:end -->"
@@ -464,6 +465,9 @@ def today_report(root: Path, today: date | None = None, horizon: int = 7,
     if decisions:
         out.append("\nRECENT DECISIONS:")
         out += [f"  {d}" for d in decisions]
+    inbox = inbox_list(root)
+    if inbox:
+        out.append(f"\nINBOX: {len(inbox)} untriaged action item(s) from the extractor — `brain loop inbox` to triage")
     later = len(open_) - len(due)
     out.append(f"\n{len(open_)} open loop(s), {later} beyond the horizon · `brain loop list` for all")
     return "\n".join(out)
@@ -486,3 +490,76 @@ def brief(root: Path, today: date | None = None, limit: int = 200) -> str:
             break
         text = cand
     return text or "No open loops."
+
+
+# ── inbox: action items the extractor found, awaiting triage into real loops ──
+
+INBOX_HEADER = """# LOOPS-INBOX — untriaged action items
+<!-- Written by the brain's extractor (brain add / brain_remember / session capture) whenever
+     remembered text contains an open action item. These are NOT loops yet: triage each with
+     `brain loop add "<title>" --due ... --next ... --from-inbox N` or discard with
+     `brain loop inbox --drop N`. The nightly sync empties this file. -->
+"""
+INBOX_LINE_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2}) · (.+?)(?: · from: (.*))?$")
+
+
+def inbox_path(root: Path) -> Path:
+    return Path(root) / INBOX_FILE
+
+
+def inbox_list(root: Path) -> list[dict]:
+    """[{date, text, source}] in file order (1-based index = position + 1)."""
+    p = inbox_path(root)
+    if not p.is_file():
+        return []
+    out = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        m = INBOX_LINE_RE.match(line.rstrip())
+        if m:
+            out.append({"date": m.group(1), "text": m.group(2).strip(), "source": (m.group(3) or "").strip()})
+    return out
+
+
+def _inbox_write(root: Path, items: list[dict]):
+    body = INBOX_HEADER + "\n" + "".join(
+        f"- {i['date']} · {i['text']}" + (f" · from: {i['source']}" if i["source"] else "") + "\n"
+        for i in items)
+    inbox_path(root).write_text(body, encoding="utf-8")
+
+
+def inbox_add(root: Path, texts: list[str], source: str = "", today: date | None = None) -> int:
+    """Append candidate tasks (deduped against what is already waiting). Returns how many were added."""
+    root = Path(root)
+    if not root.is_dir():
+        return 0
+    today = today or date.today()
+    items = inbox_list(root)
+    have = {i["text"].lower() for i in items}
+    added = 0
+    for t in texts:
+        t = " ".join(str(t).split()).replace("·", "-").strip()
+        if not t or t.lower() in have:
+            continue
+        items.append({"date": today.isoformat(), "text": t, "source": " ".join(source.split()).replace("·", "-")})
+        have.add(t.lower())
+        added += 1
+    if added:
+        _inbox_write(root, items)
+    return added
+
+
+def inbox_drop(root: Path, index: int) -> dict:
+    """Remove one entry by 1-based index; returns it. LoopError if out of range."""
+    items = inbox_list(root)
+    if not 1 <= index <= len(items):
+        raise LoopError(f"inbox has {len(items)} item(s); no item {index}")
+    gone = items.pop(index - 1)
+    _inbox_write(root, items)
+    return gone
+
+
+def inbox_clear(root: Path) -> int:
+    n = len(inbox_list(root))
+    if n:
+        _inbox_write(root, [])
+    return n

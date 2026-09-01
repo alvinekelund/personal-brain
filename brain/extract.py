@@ -9,8 +9,15 @@ Return ONLY valid JSON with this exact shape:
   ],
   "edges": [
     {"source": "...", "target": "...", "relation": "..."}
-  ]
+  ],
+  "tasks": ["..."]
 }
+
+"tasks" is NOT part of the graph. It lists OPEN, not-yet-done action items the
+person still needs to do, each as one short imperative sentence with enough
+context to act on ("email Heli about the AM 207 petition", "book the SSN
+appointment"). Never include an action already completed in the text. Empty
+list if there are none. Do NOT also create a node for a task.
 
 Node types — pick the most specific one that fits:
   category     — a broad life-area grouping (e.g. "Career", "Hobbies",
@@ -20,9 +27,6 @@ Node types — pick the most specific one that fits:
   concept      — an abstract idea, theory, or domain of knowledge
   skill        — a concrete capability someone has or is learning
   project      — an ongoing body of work with a goal
-  task         — an OPEN, not-yet-done action the person still needs to do
-                 (e.g. "email Heli"). NEVER create a task for an action already
-                 completed in the text.
   artifact     — a document, slide deck, codebase, file, or physical object
   fact         — a specific true claim or data point
   insight      — a synthesised understanding or non-obvious conclusion
@@ -55,7 +59,7 @@ Hierarchy — organise everything into a tree rooted at the person:
 - give every node a "parent": the broader node it belongs under.
 - the person's ONLY direct children are broad "category" nodes (Career, Hobbies,
   Relationships, Health, Education, ...). NEVER attach a person/concept/project/
-  task/etc. directly to the person — it must go under a category.
+  etc. directly to the person — it must go under a category.
   (e.g. a friend's parent is "Relationships" or "People", NOT the person.)
 - a specific thing's parent is its category or a more specific node under one
   (parent of "Game on Sunday" is "Football"; parent of "Football" is "Hobbies").
@@ -132,7 +136,7 @@ def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None
         )
 
     result = _parse_json(llm.generate(prompt, system=SYSTEM, response_json=True))
-    return result if isinstance(result, dict) else {"nodes": [], "edges": []}
+    return result if isinstance(result, dict) else {"nodes": [], "edges": [], "tasks": []}
 
 
 def extract(text: str, source: str = "", existing_names: list[str] | None = None,
@@ -145,7 +149,7 @@ def extract(text: str, source: str = "", existing_names: list[str] | None = None
     if len(chunks) == 1:
         return _extract_chunk(chunks[0], source, existing_names, user, categories)
 
-    merged: dict = {"nodes": [], "edges": []}
+    merged: dict = {"nodes": [], "edges": [], "tasks": []}
     seen: set[str] = set()
     for chunk in chunks:
         part = _extract_chunk(chunk, source, existing_names, user, categories)
@@ -155,6 +159,7 @@ def extract(text: str, source: str = "", existing_names: list[str] | None = None
                 seen.add(key)
                 merged["nodes"].append(n)
         merged["edges"].extend(part.get("edges", []))
+        merged["tasks"].extend(part.get("tasks", []) or [])
     return merged
 
 
@@ -186,7 +191,7 @@ def link_entities(new_nodes: list, existing_nodes: list) -> dict:
 # type → fallback category, used when a node would otherwise hang off the person
 FALLBACK_CATEGORY = {
     "person": "Relationships", "organization": "Organizations", "skill": "Skills",
-    "project": "Projects", "task": "Tasks", "event": "Events",
+    "project": "Projects", "event": "Events",
     "artifact": "Artifacts", "fact": "Knowledge", "insight": "Insights",
     "concept": "Knowledge",
 }
@@ -575,10 +580,57 @@ def subgroup_categories(conn, threshold: int = SUBGROUP_THRESHOLD) -> int:
     return moved
 
 
-def ingest(conn, raw: str, source: str = "", user: str = ""):
-    """Full ingestion pipeline shared by `brain add` and the web view:
-    ensure identity → extract → entity-link → merge (with hierarchy) → embed →
-    refresh the markdown vault. Returns (node_ids, edge_ids)."""
+def divert_tasks(extracted: dict) -> list[str]:
+    """Pull every action item out of an extraction so none becomes a graph node.
+
+    Takes the `tasks` list the prompt asks for AND any node the model still
+    typed as "task" (belt and braces), drops edges that referenced those nodes,
+    and returns the task texts. The graph is context; tasks belong in LOOPS.md.
+    """
+    tasks = [str(t).strip() for t in (extracted.get("tasks") or []) if str(t).strip()]
+    keep, dropped = [], set()
+    for n in extracted.get("nodes", []) or []:
+        if (n.get("type") or "").strip().lower() == "task":
+            name = (n.get("name") or "").strip()
+            text = (n.get("content") or "").strip() or name   # content is the actionable sentence
+            if text:
+                tasks.append(text)
+            if name:
+                dropped.add(name)
+        else:
+            keep.append(n)
+    extracted["nodes"] = keep
+    extracted["edges"] = [e for e in extracted.get("edges", []) or []
+                          if (e.get("source") or "").strip() not in dropped
+                          and (e.get("target") or "").strip() not in dropped]
+    extracted["tasks"] = []
+    seen, out = set(), []
+    for t in tasks:
+        if t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out
+
+
+def route_tasks(tasks: list[str], source: str = "", inbox_root=None) -> int:
+    """Append diverted tasks to the vault's loop inbox. Best-effort: the graph
+    write path must never fail because the vault is unavailable."""
+    if not tasks or inbox_root is False:
+        return 0
+    try:
+        from brain import config, loops
+        root = inbox_root if inbox_root is not None else config.vault_dir()
+        return loops.inbox_add(root, tasks, source=source)
+    except Exception:
+        return 0
+
+
+def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None):
+    """Full ingestion pipeline shared by `brain add`, the MCP server, ambient
+    capture and the web view: ensure identity → extract → divert tasks to the
+    loop inbox → entity-link → merge (with hierarchy) → embed → refresh the
+    markdown vault. Returns (node_ids, edge_ids). `inbox_root=False` disables
+    task routing (tests); None means the configured vault."""
     from brain import db, vault
 
     if user:
@@ -587,6 +639,7 @@ def ingest(conn, raw: str, source: str = "", user: str = ""):
     categories = [n["name"] for n in existing if n["type"] == "category"]
     ex = extract(raw, source=source, existing_names=[n["name"] for n in existing],
                  user=user, categories=categories)
+    route_tasks(divert_tasks(ex), source=source, inbox_root=inbox_root)
     links = link_entities(ex.get("nodes", []), existing)
     node_ids, edge_ids = merge_into_db(conn, ex, source, raw, entity_links=links, user=user)
     embed_nodes(conn, node_ids)

@@ -250,5 +250,35 @@ class TodayTests(LoopsTestCase):
         self.assertEqual(loops.brief(Path(tempfile.mkdtemp()), TODAY), "No open loops.")
 
 
+class InboxTests(LoopsTestCase):
+    def test_add_list_dedup(self):
+        n = loops.inbox_add(self.root, ["email Heli", " email  Heli ", "book SSN · slot"], source="brain add · x", today=TODAY)
+        self.assertEqual(n, 2)
+        items = loops.inbox_list(self.root)
+        self.assertEqual([i["text"] for i in items], ["email Heli", "book SSN - slot"])   # separator sanitised
+        self.assertEqual(items[0], {"date": "2026-09-01", "text": "email Heli", "source": "brain add - x"})
+        self.assertEqual(loops.inbox_add(self.root, ["EMAIL HELI"], today=TODAY), 0)        # case-insensitive dedup
+        self.assertTrue((self.root / "LOOPS-INBOX.md").read_text().startswith("# LOOPS-INBOX"))
+
+    def test_drop_and_clear(self):
+        loops.inbox_add(self.root, ["a", "b", "c"], today=TODAY)
+        self.assertEqual(loops.inbox_drop(self.root, 2)["text"], "b")
+        self.assertEqual([i["text"] for i in loops.inbox_list(self.root)], ["a", "c"])
+        with self.assertRaises(loops.LoopError):
+            loops.inbox_drop(self.root, 5)
+        self.assertEqual(loops.inbox_clear(self.root), 2)
+        self.assertEqual(loops.inbox_list(self.root), [])
+        self.assertEqual(loops.inbox_clear(self.root), 0)
+
+    def test_missing_vault_dir_is_a_noop(self):
+        self.assertEqual(loops.inbox_add(Path(tempfile.mkdtemp()) / "nope", ["x"], today=TODAY), 0)
+
+    def test_today_surfaces_inbox(self):
+        self.add()
+        self.assertNotIn("INBOX", loops.today_report(self.root, TODAY))
+        loops.inbox_add(self.root, ["email Heli"], today=TODAY)
+        self.assertIn("INBOX: 1 untriaged action item(s)", loops.today_report(self.root, TODAY))
+
+
 if __name__ == "__main__":
     unittest.main()

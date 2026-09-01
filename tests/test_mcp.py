@@ -48,6 +48,8 @@ class MCPTestCase(unittest.TestCase):
         db.DB_PATH = os.path.join(self._tmp, "brain.db")
         self._orig_config_path = config.CONFIG_PATH
         config.CONFIG_PATH = Path(self._tmp) / "config.json"
+        config.save({"vault_dir": str(Path(self._tmp) / "vault")})   # never the real vault
+        (Path(self._tmp) / "vault").mkdir()
         self._orig_have_key = llm.have_key
         self._orig_generate = llm.generate
         llm.have_key = lambda: False

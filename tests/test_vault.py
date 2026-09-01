@@ -86,13 +86,19 @@ class RenderTests(VaultTestCase):
         index = (self.vault_root / "graph" / "README.md").read_text()
         self.assertIn("loose-ends.md", index)
 
-    def test_digest_lists_open_tasks(self):
-        db.add_node(self.conn, "File the AM 207 petition", type_="task", importance=0.8)
+    def test_digest_lists_open_loops_from_ledger_not_task_nodes(self):
+        import datetime
+        import brain.loops as loops
+        db.add_node(self.conn, "stale task node", type_="task", importance=0.8)
         self.conn.commit()
+        loops.add(self.vault_root, "File the AM 207 petition", "2026-09-09", "alvin", "harvard",
+                  "my.harvard step", today=datetime.date(2026, 9, 1), commit=False)
         vault.render(self.conn, "", dest=self.vault_root)
         digest = (self.vault_root / "DIGEST.md").read_text()
-        self.assertIn("Open tasks", digest)
+        self.assertIn("## Open loops (from LOOPS.md)", digest)
         self.assertIn("AM 207", digest)
+        self.assertNotIn("stale task node", digest)
+        self.assertNotIn("Open tasks", digest)
 
     def test_curated_files_survive_stale_generated_are_pruned(self):
         self._build_brain()

@@ -43,11 +43,19 @@ class BrainTestCase(unittest.TestCase):
         # by mocking llm. (_load_dotenv may have loaded a real key into the env.)
         self._orig_have_key = llm.have_key
         llm.have_key = lambda: False
+        # the vault (LOOPS.md, LOOPS-INBOX.md) is resolved through config — point it at
+        # a temp dir so digest/ingest never read or write the real one
+        self._orig_config_path = config.CONFIG_PATH
+        config.CONFIG_PATH = Path(self._tmp) / "config.json"
+        self.vault_tmp = Path(self._tmp) / "vault"
+        self.vault_tmp.mkdir()
+        config.save({"vault_dir": str(self.vault_tmp)})
 
     def tearDown(self):
         self.conn.close()
         db.DB_PATH = self._orig_db_path
         llm.have_key = self._orig_have_key
+        config.CONFIG_PATH = self._orig_config_path
 
     def _age(self, node_id, days):
         """Backdate a node's last_accessed by `days` days."""
@@ -216,6 +224,60 @@ class IngestTests(BrainTestCase):
         parents = [e for e in db.edges_for_node(self.conn, piano["id"])
                    if e["source_id"] == piano["id"] and e["relation"] == "part_of"]
         self.assertTrue(parents)  # placed under a category, not floating
+
+
+    def test_ingest_routes_tasks_to_inbox_not_graph(self):
+        """The prompt's `tasks` list AND any stray task-typed node both land in
+        LOOPS-INBOX.md; edges to the dropped node vanish; no task node is created."""
+        import brain.loops as loops
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        responses = iter([
+            '{"nodes":[{"name":"AM 207","type":"concept","parent":"Education","importance":0.5},'
+            '{"name":"File petition","type":"task","content":"File the AM 207 petition on my.harvard","parent":"Education"}],'
+            '"edges":[{"source":"File petition","target":"AM 207","relation":"relates_to"}],'
+            '"tasks":["email Protopapas about late arrival", "File the AM 207 petition on my.harvard"]}',
+            '{}',  # link_entities
+        ])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            nids, eids = extract.ingest(self.conn, "notes", source="test", user="Alvin")
+        finally:
+            llm.generate = orig
+        self.assertIsNotNone(db.get_node_by_name(self.conn, "AM 207"))
+        self.assertIsNone(db.get_node_by_name(self.conn, "File petition"))
+        self.assertEqual([n["type"] for n in db.all_nodes(self.conn) if n["type"] == "task"], [])
+        self.assertFalse(any(e["relation"] == "relates_to" for nid in nids for e in db.edges_for_node(self.conn, nid)))
+        inbox = loops.inbox_list(self.vault_tmp)
+        self.assertEqual([i["text"] for i in inbox],
+                         ["email Protopapas about late arrival", "File the AM 207 petition on my.harvard"])  # deduped
+        self.assertEqual(inbox[0]["source"], "test")
+
+    def test_ingest_inbox_root_false_disables_routing(self):
+        import brain.loops as loops
+        responses = iter(['{"nodes":[],"edges":[],"tasks":["do x"]}', '{}'])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            extract.ingest(self.conn, "notes", source="t", inbox_root=False)
+        finally:
+            llm.generate = orig
+        self.assertEqual(loops.inbox_list(self.vault_tmp), [])
+
+    def test_divert_tasks_pure(self):
+        ex = {"nodes": [{"name": "A", "type": "concept"}, {"name": "T", "type": "Task", "content": "do T"}],
+              "edges": [{"source": "T", "target": "A"}, {"source": "A", "target": "A"}],
+              "tasks": ["do T", " ", "do U"]}
+        tasks = extract.divert_tasks(ex)
+        self.assertEqual(tasks, ["do T", "do U"])
+        self.assertEqual([n["name"] for n in ex["nodes"]], ["A"])
+        self.assertEqual(ex["edges"], [{"source": "A", "target": "A"}])
+        self.assertEqual(ex["tasks"], [])
+
+    def test_prompt_has_no_task_node_type(self):
+        self.assertNotIn("task         —", extract.SYSTEM)
+        self.assertIn('"tasks": ["..."]', extract.SYSTEM)
+        self.assertNotIn("task", extract.FALLBACK_CATEGORY)
 
 
 class Visualize3DTests(BrainTestCase):
@@ -702,16 +764,21 @@ class GraphTests(BrainTestCase):
         self.assertNotIn(self.c, nodes)    # football excluded (below similarity floor)
 
     def test_digest(self):
+        import brain.loops as loops
         db.ensure_identity_anchor(self.conn, "Alvin")
         db.add_node(self.conn, "Master's Thesis", type_="project", importance=0.95)
         db.add_node(self.conn, "trivia", type_="concept", importance=0.1)
-        db.add_node(self.conn, "email advisor", type_="task", importance=0.3)
+        db.add_node(self.conn, "legacy task node", type_="task", importance=0.3)
         self.conn.commit()
-        d = graph.digest(self.conn, "Alvin")
+        loops.add(self.vault_tmp, "Email advisor", "2026-09-09", "alvin", "harvard", "send it",
+                  today=__import__("datetime").date(2026, 9, 1), commit=False)
+        d = graph.digest(self.conn, "Alvin")                        # default root = configured vault
         self.assertEqual(d["top"][0]["name"], "Master's Thesis")   # highest importance first
-        self.assertIn("email advisor", d["tasks"])                  # open tasks listed
+        self.assertEqual(d["tasks"], ["Email advisor (due 2026-09-09, alvin) L-001"])  # from LOOPS.md …
+        self.assertNotIn("legacy task node", " ".join(d["tasks"]))   # … never from graph task nodes
         self.assertNotIn("Alvin", [t["name"] for t in d["top"]])    # identity excluded
         self.assertIn("areas", d)
+        self.assertEqual(graph.digest(self.conn, "Alvin", loops_root=self._tmp)["tasks"], [])
 
     def test_category_breakdown(self):
         db.ensure_identity_anchor(self.conn, "Alvin")

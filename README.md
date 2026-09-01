@@ -10,7 +10,7 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 ## What it does
 
-**Ingestion** — point it at anything: a paragraph, an article, a book chapter, a meeting transcript. Gemini Flash extracts typed nodes (concepts, skills, projects, people, facts, insights, events) and semantic edges (builds_on, requires, contradicts, part_of, etc.). Long input is chunked so nothing is dropped.
+**Ingestion** — point it at anything: a paragraph, an article, a book chapter, a meeting transcript. Gemini Flash extracts typed nodes (concepts, skills, projects, people, facts, insights, events) and semantic edges (builds_on, requires, contradicts, part_of, etc.). Long input is chunked so nothing is dropped. The graph is *context*, not a to-do list: open action items in the text are returned separately and routed to the vault's `LOOPS-INBOX.md` for triage into real loops — they never become nodes.
 
 **Person-rooted hierarchy** — it's a graph, but with a backbone: every node is placed under a `category` (Career, Hobbies, Relationships, …) that hangs off *you*, forming a `You → Category → Topic → Detail` tree via `part_of` — while cross-links between branches keep it a graph. `brain tree` prints the hierarchy; `brain reorganize` retrofits an existing flat brain into it.
 
@@ -134,13 +134,14 @@ brain loop done L-003 --note "enrolled 9.522"    # close; ids are never reused
 brain loop edit L-004 --due 2026-09-12 --owner waiting:protopapas --next "nudge if silent"
 brain loop list [--all] [--area jobs]            # open loops by prio, then due
 brain loop lint                                  # grammar, duplicate ids, NOW.md drift; exit 1 on errors
+brain loop inbox [--drop N | --clear]            # action items the extractor found; triage with `loop add --from-inbox N`
 brain decide "Fourth-seat plan of record" --what "..." --why "..." --rejected "..." --revisit "..."
 brain decisions [--last 5] [--lint]              # DECISIONS.md is append-only (git pre-commit enforced)
 brain today [--brief] [--date YYYY-MM-DD]        # action card: health line, countdowns, waits, Claude-owned loops, top 3
 brain doctor [--brief] [--install-hooks]         # binary, graph, key, vault freshness, ledgers, hooks, MCP, scheduled tasks
 
 # Maintenance
-brain digest                     # at-a-glance: top of mind, open tasks, fading, by area
+brain digest                     # at-a-glance: top of mind, open loops (from LOOPS.md), fading, by area
 brain status                     # stats + decay report + what's fading soon
 brain synthesize                 # find and surface new connections
 brain reindex                    # (re)compute embeddings for semantic search

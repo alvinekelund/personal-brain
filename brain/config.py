@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from brain import DATA_DIR
 
 CONFIG_PATH = DATA_DIR / "config.json"
@@ -29,3 +30,10 @@ def set_user(name: str):
     cfg = load()
     cfg["user"] = name
     save(cfg)
+
+
+def vault_dir() -> Path:
+    """The vault location: config `vault_dir` if set, else <data>/vault.
+    Lives here (not in vault.py) so graph/loops can resolve it without importing the renderer."""
+    configured = load().get("vault_dir", "")
+    return Path(configured).expanduser() if configured else DATA_DIR / "vault"

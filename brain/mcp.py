@@ -22,9 +22,12 @@ INSTRUCTIONS = (
     "with human-like forgetting. Call brain_context or brain_digest at the "
     "start of a session to load who the user is and what they're working on. "
     "Call brain_remember whenever the user shares something durable — facts, "
-    "decisions, preferences, project updates, people. Call brain_ask or "
-    "brain_search to recall specifics. Reading a memory reinforces it; "
-    "unaccessed memories fade on a forgetting curve."
+    "decisions, preferences, project updates, people. The graph is CONTEXT, not "
+    "a to-do list: any open action item in remembered text is routed to the "
+    "vault's LOOPS-INBOX.md for triage (`brain loop inbox`), and brain_digest "
+    "lists open loops from LOOPS.md. Call brain_ask or brain_search to recall "
+    "specifics. Reading a memory reinforces it; unaccessed memories fade on a "
+    "forgetting curve."
 )
 
 TOOLS = [
@@ -35,7 +38,8 @@ TOOLS = [
             "worth remembering — a fact learned, a decision made, a preference "
             "expressed, a project update, a person mentioned. Typed entities and "
             "relationships are extracted automatically and merged with what the "
-            "graph already knows (duplicates reinforce rather than duplicate)."
+            "graph already knows (duplicates reinforce rather than duplicate). "
+            "Open action items are NOT stored as nodes — they go to the loop inbox."
         ),
         "inputSchema": {
             "type": "object",
@@ -202,7 +206,7 @@ def _digest(conn, args):
         lines.append("Top of mind:")
         lines += [f"  [{t['type']}] {t['name']} (importance {t['importance']})" for t in d["top"]]
     if d["tasks"]:
-        lines.append("Open tasks:")
+        lines.append("Open loops (LOOPS.md):")
         lines += [f"  - {t}" for t in d["tasks"]]
     if d["fading"]:
         lines.append("Fading soon:")
