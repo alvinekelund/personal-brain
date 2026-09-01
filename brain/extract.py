@@ -577,9 +577,9 @@ def subgroup_categories(conn, threshold: int = SUBGROUP_THRESHOLD) -> int:
 
 def ingest(conn, raw: str, source: str = "", user: str = ""):
     """Full ingestion pipeline shared by `brain add` and the web view:
-    ensure identity → extract → entity-link → merge (with hierarchy) → embed.
-    Returns (node_ids, edge_ids)."""
-    from brain import db
+    ensure identity → extract → entity-link → merge (with hierarchy) → embed →
+    refresh the markdown vault. Returns (node_ids, edge_ids)."""
+    from brain import db, vault
 
     if user:
         db.ensure_identity_anchor(conn, user)
@@ -590,4 +590,5 @@ def ingest(conn, raw: str, source: str = "", user: str = ""):
     links = link_entities(ex.get("nodes", []), existing)
     node_ids, edge_ids = merge_into_db(conn, ex, source, raw, entity_links=links, user=user)
     embed_nodes(conn, node_ids)
+    vault.auto_render(conn, user)  # keep the markdown file layer in step with the graph
     return node_ids, edge_ids

@@ -119,6 +119,12 @@ brain mcp                             # or point any MCP client at this (stdio)
 brain tree                       # print the person-rooted hierarchy
 brain reorganize                 # retrofit existing flat nodes into the hierarchy
 
+# Markdown vault — the brain's file layer
+brain vault                      # render the graph into ~/.personal-brain/vault/
+                                 #   (DIGEST.md + graph/<life-area>.md; also auto-runs
+                                 #   after every add — curated notes alongside are never touched)
+brain vault --set-dir ~/notes    # persist a different vault location
+
 # Maintenance
 brain digest                     # at-a-glance: top of mind, open tasks, fading, by area
 brain status                     # stats + decay report + what's fading soon
@@ -207,6 +213,7 @@ Query / Output
 | `brain/server.py` | Live auto-reloading web view (`brain serve`) |
 | `brain/mcp.py` | MCP server over stdio (stdlib JSON-RPC, no SDK) — agent memory tools |
 | `integrations/claude_code_capture.py` | Claude Code SessionEnd hook — ambient memory capture |
+| `brain/vault.py` | Markdown vault renderer — deterministic file views of the graph |
 | `brain/portability.py` | JSON export / import |
 | `cli.py` | Click CLI entry point |
 

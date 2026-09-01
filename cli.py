@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import click
-from brain import db, decay, extract, graph, visualize, config, portability
+from brain import db, decay, extract, graph, visualize, config, portability, vault
 
 
 @click.group()
@@ -283,6 +283,33 @@ def digest():
             click.echo(f"  - {f['name']} ({left})")
     if d["areas"]:
         click.echo("By area: " + ", ".join(f"{n} ({c})" for n, c in d["areas"]))
+
+
+# ── vault ─────────────────────────────────────────────────────────────────────
+
+@cli.command("vault")
+@click.option("--dir", "dest", type=click.Path(), default=None,
+              help="Render here instead of the configured vault directory.")
+@click.option("--set-dir", "set_dir", type=click.Path(), default=None,
+              help="Persist a vault directory in config, then render there.")
+def vault_cmd(dest, set_dir):
+    """Render the graph into the markdown vault (the brain's file layer).
+
+    Also runs automatically after every `brain add` / web add (disable with
+    config vault_auto=false). Curated files in the vault are never touched.
+    """
+    if set_dir:
+        cfg = config.load()
+        cfg["vault_dir"] = set_dir
+        config.save(cfg)
+        dest = set_dir
+    conn = db.connect()
+    _run_decay(conn)
+    paths = vault.render(conn, config.get_user(), dest=dest)
+    root = dest or vault.vault_dir()
+    click.echo(f"Vault rendered: {len(paths)} generated file(s) in {root}")
+    for p in paths:
+        click.echo(f"  {p}")
 
 
 # ── status ────────────────────────────────────────────────────────────────────
