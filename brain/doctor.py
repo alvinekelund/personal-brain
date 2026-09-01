@@ -31,7 +31,7 @@ EXPECTED_BIN = DATA_DIR / "venv" / "bin" / "brain"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 CLAUDE_JSON = Path.home() / ".claude.json"
 SCHEDULED_TASKS = Path.home() / ".claude" / "scheduled-tasks"
-ABS_PATH_RE = re.compile(r"(/[\w./+-]+)")
+ABS_PATH_RE = re.compile(r"(~?/[\w./+-]+)")
 
 
 @dataclass
@@ -137,8 +137,8 @@ def _paths_in(text: str) -> list[str]:
     """Absolute paths mentioned in a hook/prompt that belong to the brain wiring."""
     found = []
     for p in ABS_PATH_RE.findall(text):
-        p = p.rstrip(".,;:")
-        if ("brain" in p or "python" in p or "personal-brain" in p) and p not in found:
+        p = str(Path(p.rstrip(".,;:/")).expanduser())
+        if ("brain" in p or "python" in p) and p not in found:
             found.append(p)
     return found
 

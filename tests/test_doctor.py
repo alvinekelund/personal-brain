@@ -119,6 +119,14 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("✓ binary", text)
         self.assertRegex(text, r"[✓⚠✗] graph")
 
+    def test_tilde_paths_are_expanded_not_flagged(self):
+        home_rel = "~/" + str(self.bin.relative_to(Path.home())) if str(self.bin).startswith(str(Path.home())) else str(self.bin)
+        (self.tasks / "nightly" / "SKILL.md").write_text(f"run {home_rel} add; vault at ~/.personal-brain/vault/\n")
+        (self.tasks / "nightly" / "SKILL.md").write_text(f"run {home_rel} add\n")
+        self.assertEqual(by_name(self.run_doctor())["scheduled-tasks"].status, "ok")
+        self.assertEqual(doctor._paths_in("reinstall: ~/x/brain and /y/python3 and /z/other"),
+                         [str(Path("~/x/brain").expanduser()), "/y/python3"])
+
     def test_unregistered_mcp_is_a_warning(self):
         self.claude_json.write_text(json.dumps({"mcpServers": {}}))
         self.assertEqual(by_name(self.run_doctor())["mcp"].status, "warn")
