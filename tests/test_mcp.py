@@ -243,10 +243,15 @@ class ToolCallTests(MCPTestCase):
         self.seed("Thesis", type_="project", content="MS thesis", importance=0.9)
         self.seed("Email Heli", type_="task", importance=0.3)
         llm.generate = lambda *a, **k: self.fail("digest must not call the LLM")
+        import datetime
+        import brain.loops as loops
+        loops.add(Path(config.load()["vault_dir"]), "Email Heli", "2026-09-09", "alvin", "harvard",
+                  "send it", today=datetime.date(2026, 9, 1), commit=False)
         result = call_tool("brain_digest")
         text = tool_text(result)
         self.assertIn("Thesis", text)
-        self.assertIn("Email Heli", text)
+        self.assertIn("Open loops (LOOPS.md):", text)
+        self.assertIn("Email Heli (due 2026-09-09, alvin) L-001", text)   # from the ledger, not a task node
 
     def test_digest_empty_brain(self):
         self.assertIn("empty", tool_text(call_tool("brain_digest")))
