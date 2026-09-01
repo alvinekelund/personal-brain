@@ -14,7 +14,7 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Person-rooted hierarchy** — it's a graph, but with a backbone: every node is placed under a `category` (Career, Hobbies, Relationships, …) that hangs off *you*, forming a `You → Category → Topic → Detail` tree via `part_of` — while cross-links between branches keep it a graph. `brain tree` prints the hierarchy; `brain reorganize` retrofits an existing flat brain into it.
 
-**Importance-weighted forgetting** — each node has an `importance` (0–1, scored at ingest) and a type half-life. Important nodes decay much slower and never auto-archive; one-off details still fade. Accessing a node resets it to 1.0 and propagates a freshness boost up its branch. Decay runs automatically on every CLI call.
+**Importance-weighted forgetting** — each node has an `importance` (0–1, scored at ingest) and a type half-life. Important nodes decay much slower and never auto-archive; one-off details still fade. Accessing a node resets it to 1.0 and propagates a freshness boost up its branch. Decay runs automatically on every CLI call but is purely time-based: nodes and edges carry a `last_decayed` clock and only the interval since then is applied, so call frequency never compounds it. Hierarchy (`part_of`) edges may fade but are never pruned — the spine survives long silences.
 
 **Search** — `brain query "x"` (stem-aware keyword) or `brain query "x" --semantic` (embedding cosine — finds by *meaning*, e.g. "machine learning" surfaces your neural-net nodes). `brain reindex` (re)computes embeddings; new nodes are embedded automatically on `add`.
 
