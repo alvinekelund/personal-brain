@@ -259,10 +259,13 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
             if cat_id != nid:
                 new_edges.append(db.add_edge(conn, nid, cat_id, "part_of"))
 
-    # 3. root every category at the identity
-    for nid in set(name_to_id.values()):
-        node = db.get_node(conn, nid)
-        if not node or node["type"] != "category" or nid == identity["id"]:
+    # 3. root every parentless category at the identity — ALL categories in the
+    #    graph, not just the ones this batch touched: `brain reorganize` plans only
+    #    non-category nodes, so a category detached by decay would otherwise never
+    #    be re-rooted (which is exactly what happened in Sep 2026).
+    for node in db.all_nodes(conn):
+        nid = node["id"]
+        if node["type"] != "category" or nid == identity["id"]:
             continue
         if not any(e["source_id"] == nid and e["relation"] == "part_of"
                    for e in db.edges_for_node(conn, nid)):

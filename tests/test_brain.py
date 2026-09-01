@@ -283,6 +283,26 @@ class IngestTests(BrainTestCase):
         self.assertTrue(parents)  # placed under a category, not floating
 
 
+    def test_merge_reroots_detached_categories(self):
+        """A category that lost its part_of edge to the person (decay, a bad
+        migration) is re-rooted by the next merge — even when the plan never
+        mentions it, as `brain reorganize` plans only non-category nodes."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        ident = db.get_node_by_name(self.conn, "Alvin")["id"]
+        loose = db.add_node(self.conn, "Relationships", type_="category")
+        gf = db.add_node(self.conn, "Girlfriend", type_="person")
+        db.add_edge(self.conn, gf, loose, "part_of")
+        self.conn.commit()
+        extract.merge_into_db(self.conn, {"nodes": [{"name": "Girlfriend", "parent": "Relationships"}], "edges": []},
+                              "reorganize", "", user="Alvin")
+        rooted = [e for e in db.edges_for_node(self.conn, loose)
+                  if e["source_id"] == loose and e["target_id"] == ident and e["relation"] == "part_of"]
+        self.assertEqual(len(rooted), 1)
+        untouched = db.add_node(self.conn, "Hobbies", type_="category")   # not in any plan
+        self.conn.commit()
+        extract.merge_into_db(self.conn, {"nodes": [], "edges": []}, "reorganize", "", user="Alvin")
+        self.assertTrue(any(e["target_id"] == ident for e in db.edges_for_node(self.conn, untouched)))
+
     def test_ingest_routes_tasks_to_inbox_not_graph(self):
         """The prompt's `tasks` list AND any stray task-typed node both land in
         LOOPS-INBOX.md; edges to the dropped node vanish; no task node is created."""
