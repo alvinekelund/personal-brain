@@ -776,6 +776,8 @@ class GraphTests(BrainTestCase):
         self.assertEqual(d["top"][0]["name"], "Master's Thesis")   # highest importance first
         self.assertEqual(d["tasks"], ["Email advisor (due 2026-09-09, alvin) L-001"])  # from LOOPS.md …
         self.assertNotIn("legacy task node", " ".join(d["tasks"]))   # … never from graph task nodes
+        self.assertNotIn("legacy task node", [f["name"] for f in d["fading"]])
+        self.assertNotIn("legacy task node", [n["name"] for n in d["top"]])
         self.assertNotIn("Alvin", [t["name"] for t in d["top"]])    # identity excluded
         self.assertIn("areas", d)
         self.assertEqual(graph.digest(self.conn, "Alvin", loops_root=self._tmp)["tasks"], [])

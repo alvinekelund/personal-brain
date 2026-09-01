@@ -181,7 +181,7 @@ def digest(conn, user: str = "", top: int = 6, loops_root=None) -> dict:
         "top": [{"name": n["name"], "type": n["type"], "importance": round(imp(n), 2)}
                 for n in top_nodes],
         "tasks": open_loops(loops_root),
-        "fading": decay.at_risk_nodes(conn),
+        "fading": [f for f in decay.at_risk_nodes(conn) if f.get("type") != "task"],
         "areas": category_breakdown(conn, user),
     }
 
