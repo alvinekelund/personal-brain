@@ -8,3 +8,4 @@ build/
 *.sqlite
 .venv/
 _loop_test*.py
+.DS_Store

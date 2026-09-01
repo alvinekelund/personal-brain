@@ -2,6 +2,8 @@
 import sys
 import click
 from brain import db, decay, extract, graph, visualize, config, portability, vault
+from brain import loops, decisions, doctor as doctor_mod
+from datetime import datetime as _dt
 
 
 @click.group()
@@ -512,3 +514,206 @@ def _synthesize(conn):
 
 if __name__ == "__main__":
     cli()
+
+
+# ── loops / decisions / today / doctor — the vault's action layer ─────────────
+
+def _vault_root():
+    return vault.vault_dir()
+
+
+def _parse_day(s):
+    return _dt.strptime(s, "%Y-%m-%d").date() if s else None
+
+
+def _die(e):
+    click.echo(f"error: {e}", err=True)
+    sys.exit(1)
+
+
+@cli.group()
+def loop():
+    """Manage LOOPS.md, the open-loop ledger (the brain's task system)."""
+
+
+@loop.command("add")
+@click.argument("title")
+@click.option("--due", required=True, help="YYYY-MM-DD: hard deadline or act/review-by date.")
+@click.option("--next", "next_", required=True, help="The single concrete next action.")
+@click.option("--owner", default="alvin", show_default=True, help="alvin | claude | waiting:<who>")
+@click.option("--area", default="other", show_default=True, help=" | ".join(loops.AREAS))
+@click.option("--prio", default=2, show_default=True, type=click.IntRange(1, 3))
+@click.option("--since", default=None, help="Backdate when the loop was really opened.")
+@click.option("--date", "today", default=None, help="Pretend today is YYYY-MM-DD (tests/migration).")
+@click.option("--no-commit", is_flag=True)
+def loop_add(title, due, next_, owner, area, prio, since, today, no_commit):
+    """Open a loop; re-renders NOW.md and commits the vault."""
+    try:
+        l = loops.add(_vault_root(), title, due, owner, area, next_, prio=prio, since=since,
+                      today=_parse_day(today), commit=not no_commit)
+    except loops.LoopError as e:
+        _die(e)
+    click.echo(l.to_line())
+
+
+@loop.command("done")
+@click.argument("lid")
+@click.option("--note", default="", help="How it closed (kept on the closed line).")
+@click.option("--date", "today", default=None)
+@click.option("--no-commit", is_flag=True)
+def loop_done(lid, note, today, no_commit):
+    """Close a loop (moves it to the Closed list)."""
+    try:
+        l = loops.done(_vault_root(), lid, note=note, today=_parse_day(today), commit=not no_commit)
+    except loops.LoopError as e:
+        _die(e)
+    click.echo(l.to_line())
+
+
+@loop.command("edit")
+@click.argument("lid")
+@click.option("--title")
+@click.option("--due")
+@click.option("--next", "next_")
+@click.option("--owner")
+@click.option("--area")
+@click.option("--prio", type=click.IntRange(1, 3))
+@click.option("--note")
+@click.option("--date", "today", default=None)
+@click.option("--no-commit", is_flag=True)
+def loop_edit(lid, title, due, next_, owner, area, prio, note, today, no_commit):
+    """Change fields on an open loop (also bumps `touched`)."""
+    try:
+        l = loops.edit(_vault_root(), lid, today=_parse_day(today), commit=not no_commit,
+                       title=title, due=due, next_=next_, owner=owner, area=area, prio=prio, note=note)
+    except loops.LoopError as e:
+        _die(e)
+    click.echo(l.to_line())
+
+
+@loop.command("touch")
+@click.argument("lid")
+@click.option("--date", "today", default=None)
+@click.option("--no-commit", is_flag=True)
+def loop_touch(lid, today, no_commit):
+    """Mark a loop as reviewed today without changing it."""
+    try:
+        l = loops.touch(_vault_root(), lid, today=_parse_day(today), commit=not no_commit)
+    except loops.LoopError as e:
+        _die(e)
+    click.echo(l.to_line())
+
+
+@loop.command("list")
+@click.option("--all", "show_all", is_flag=True, help="Include closed loops.")
+@click.option("--area", default=None)
+def loop_list(show_all, area):
+    """Print open loops (prio, then due)."""
+    ledger = loops.load(_vault_root())
+    rows = sorted(ledger.open, key=lambda l: (l.prio, l.due, l.id))
+    if show_all:
+        rows += sorted(ledger.closed, key=lambda l: (l.done, l.id), reverse=True)
+    if area:
+        rows = [l for l in rows if l.area == area]
+    for l in rows:
+        click.echo(l.to_line())
+    if ledger.errors:
+        click.echo(f"\n{len(ledger.errors)} parse error(s) — run `brain loop lint`", err=True)
+
+
+@loop.command("lint")
+@click.option("--date", "today", default=None)
+def loop_lint(today):
+    """Validate LOOPS.md and NOW.md's rendered block. Exit 1 on errors."""
+    errors, warnings = loops.lint(_vault_root(), _parse_day(today))
+    for w in warnings:
+        click.echo(f"⚠ {w}")
+    for e in errors:
+        click.echo(f"✗ {e}")
+    if not errors:
+        click.echo(f"✓ LOOPS.md ok ({len(loops.load(_vault_root()).open)} open, {len(warnings)} warning(s))")
+    sys.exit(1 if errors else 0)
+
+
+@loop.command("render")
+@click.option("--no-commit", is_flag=True)
+def loop_render(no_commit):
+    """Regenerate NOW.md's hot section from LOOPS.md."""
+    root = _vault_root()
+    ledger = loops.load(root)
+    if ledger.errors:
+        _die("LOOPS.md has parse errors — run `brain loop lint`")
+    changed = loops.render_now(root, ledger)
+    if changed and not no_commit:
+        loops.git_commit(root, "loops: render NOW.md")
+    click.echo("NOW.md updated" if changed else "NOW.md already current")
+
+
+@cli.command()
+@click.argument("title")
+@click.option("--what", required=True, help="The decision, one sentence.")
+@click.option("--why", required=True)
+@click.option("--rejected", default="—", help="Alternatives considered and dropped.")
+@click.option("--revisit", default="—", help="What would reopen this decision.")
+@click.option("--source", default="—", help="Session / log / artifact that settled it.")
+@click.option("--date", "when", default=None)
+@click.option("--no-commit", is_flag=True)
+def decide(title, what, why, rejected, revisit, source, when, no_commit):
+    """Append an entry to DECISIONS.md (append-only ledger)."""
+    try:
+        d = decisions.append(_vault_root(), title, what, why, rejected, revisit, source,
+                             when=_parse_day(when), commit=not no_commit)
+    except decisions.DecisionError as e:
+        _die(e)
+    click.echo(d.to_md())
+
+
+@cli.command("decisions")
+@click.option("--lint", "do_lint", is_flag=True)
+@click.option("--last", default=0, type=int, help="Show only the last N entries.")
+def decisions_cmd(do_lint, last):
+    """List decisions, or --lint the ledger."""
+    root = _vault_root()
+    if do_lint:
+        errs = decisions.lint(root)
+        for e in errs:
+            click.echo(f"✗ {e}")
+        if not errs:
+            click.echo(f"✓ DECISIONS.md ok ({len(decisions.load(root)[0])} entries)")
+        sys.exit(1 if errs else 0)
+    ds, errs = decisions.load(root)
+    for d in (ds[-last:] if last else ds):
+        click.echo(f"{d.id} · {d.date} · {d.title}\n    {d.decision}")
+    for e in errs:
+        click.echo(f"✗ {e}", err=True)
+
+
+@cli.command()
+@click.option("--date", "today", default=None, help="Pretend today is YYYY-MM-DD.")
+@click.option("--days", default=7, show_default=True, help="Due-soon horizon.")
+@click.option("--brief", is_flag=True, help="One plain-text line (<200 chars) for a phone push.")
+@click.option("--no-doctor", is_flag=True, help="Skip the health line.")
+def today(today, days, brief, no_doctor):
+    """Deterministic action card: countdowns, waits, Claude-owned loops, top actions."""
+    root = _vault_root()
+    day = _parse_day(today)
+    if brief:
+        click.echo(loops.brief(root, day))
+        return
+    line = "" if no_doctor else doctor_mod.brief(doctor_mod.run(root, day))
+    click.echo(loops.today_report(root, day, horizon=days, doctor_line=line,
+                                  decisions=decisions.recent(root, day)))
+
+
+@cli.command("doctor")
+@click.option("--brief", is_flag=True, help="One summary line.")
+@click.option("--install-hooks", is_flag=True, help="Install the vault's append-only pre-commit hook.")
+@click.option("--date", "today", default=None)
+def doctor_cmd(brief, install_hooks, today):
+    """Health check: binary, graph, key, vault freshness, ledgers, hooks, MCP, scheduled tasks. Exit 1 on failure."""
+    root = _vault_root()
+    if install_hooks:
+        click.echo("pre-commit hook: " + ("installed" if decisions.install_pre_commit(root) else "vault is not a git repo"))
+    checks = doctor_mod.run(root, _parse_day(today))
+    click.echo(doctor_mod.brief(checks) if brief else doctor_mod.report(checks))
+    sys.exit(1 if doctor_mod.worst(checks) == "fail" else 0)

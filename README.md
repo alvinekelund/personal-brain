@@ -24,6 +24,8 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Synthesis** — `brain synthesize` finds isolated nodes and connects them to the graph, surfacing relationships Gemini notices across your knowledge.
 
+**Action layer** — `LOOPS.md` (one loop per line in a strict grammar: id, title, due, owner alvin/claude/waiting:<who>, area, prio, next action) and `DECISIONS.md` (append-only: decision, why, rejected, revisit-if). Both are written only by `brain loop` / `brain decide`; `lint` fails on hand edits and a git pre-commit hook rejects removals from the decision ledger. NOW.md's "hot" section is rendered from the loops. `brain today` turns them into a deterministic action card (countdowns, aging waits, Claude-owned loops, top 3 next actions) and `brain doctor` checks the whole wiring — binary, DB, key, vault freshness, hooks, MCP registration, scheduled tasks — so a broken brain announces itself at session start instead of failing silently.
+
 **Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
 
 **Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt.
@@ -124,6 +126,18 @@ brain vault                      # render the graph into ~/.personal-brain/vault
                                  #   (DIGEST.md + graph/<life-area>.md; also auto-runs
                                  #   after every add — curated notes alongside are never touched)
 brain vault --set-dir ~/notes    # persist a different vault location
+
+# Action layer — the vault's task system (no LLM, deterministic, session-safe)
+brain loop add "Lock the fourth seat" --due 2026-09-09 --owner alvin --area harvard --prio 1 \
+               --next "click Enroll Selected"     # opens L-nnn, re-renders NOW.md, commits the vault
+brain loop done L-003 --note "enrolled 9.522"    # close; ids are never reused
+brain loop edit L-004 --due 2026-09-12 --owner waiting:protopapas --next "nudge if silent"
+brain loop list [--all] [--area jobs]            # open loops by prio, then due
+brain loop lint                                  # grammar, duplicate ids, NOW.md drift; exit 1 on errors
+brain decide "Fourth-seat plan of record" --what "..." --why "..." --rejected "..." --revisit "..."
+brain decisions [--last 5] [--lint]              # DECISIONS.md is append-only (git pre-commit enforced)
+brain today [--brief] [--date YYYY-MM-DD]        # action card: health line, countdowns, waits, Claude-owned loops, top 3
+brain doctor [--brief] [--install-hooks]         # binary, graph, key, vault freshness, ledgers, hooks, MCP, scheduled tasks
 
 # Maintenance
 brain digest                     # at-a-glance: top of mind, open tasks, fading, by area
