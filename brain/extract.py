@@ -628,12 +628,32 @@ def route_tasks(tasks: list[str], source: str = "", inbox_root=None) -> int:
         return 0
 
 
+def commit_vault_writes(source: str = "", inbox_root=None) -> bool:
+    """Commit what an ingest wrote into the vault (LOOPS-INBOX.md and the
+    generated views), scoped so it never sweeps up curated files someone is
+    mid-editing. The CLI commits its own ledger writes; without this every
+    ingest left the vault git-dirty until a session mopped it up. Best-effort:
+    ingestion must never fail on a git problem."""
+    if inbox_root is False:
+        return False
+    try:
+        from brain import config, loops
+        root = inbox_root if inbox_root is not None else config.vault_dir()
+        src = " ".join((source or "").split())
+        return loops.git_commit_paths(
+            root, ["DIGEST.md", "graph", loops.INBOX_FILE, loops.INBOX_SEEN_FILE],
+            f"ingest: refresh generated views ({src[:60]})" if src else "ingest: refresh generated views")
+    except Exception:
+        return False
+
+
 def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None):
     """Full ingestion pipeline shared by `brain add`, the MCP server, ambient
     capture and the web view: ensure identity → extract → divert tasks to the
     loop inbox → entity-link → merge (with hierarchy) → embed → refresh the
-    markdown vault. Returns (node_ids, edge_ids). `inbox_root=False` disables
-    task routing (tests); None means the configured vault."""
+    markdown vault → commit the vault writes. Returns (node_ids, edge_ids).
+    `inbox_root=False` disables task routing and the commit (tests); None means
+    the configured vault."""
     from brain import db, vault
 
     if user:
@@ -647,4 +667,5 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None):
     node_ids, edge_ids = merge_into_db(conn, ex, source, raw, entity_links=links, user=user)
     embed_nodes(conn, node_ids)
     vault.auto_render(conn, user)  # keep the markdown file layer in step with the graph
+    commit_vault_writes(source=source, inbox_root=inbox_root)
     return node_ids, edge_ids

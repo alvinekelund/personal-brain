@@ -303,6 +303,7 @@ def vault_cmd(dest, set_dir):
 
     Also runs automatically after every `brain add` / web add (disable with
     config vault_auto=false). Curated files in the vault are never touched.
+    Generated views are committed (the CLI commits its own writes).
     """
     if set_dir:
         cfg = config.load()
@@ -313,6 +314,7 @@ def vault_cmd(dest, set_dir):
     _run_decay(conn)
     paths = vault.render(conn, config.get_user(), dest=dest)
     root = dest or vault.vault_dir()
+    loops.git_commit_paths(root, ["DIGEST.md", "graph"], "vault: render generated views")
     click.echo(f"Vault rendered: {len(paths)} generated file(s) in {root}")
     for p in paths:
         click.echo(f"  {p}")
@@ -516,10 +518,6 @@ def _synthesize(conn):
     click.echo(f"Synthesis complete. {len(made)} new connection(s).")
 
 
-if __name__ == "__main__":
-    cli()
-
-
 # ── loops / decisions / today / doctor — the vault's action layer ─────────────
 
 def _vault_root():
@@ -559,7 +557,7 @@ def loop_add(title, due, next_, owner, area, prio, since, today, from_inbox, no_
         l = loops.add(root, title, due, owner, area, next_, prio=prio, since=since,
                       today=_parse_day(today), commit=not no_commit)
         if from_inbox is not None:
-            gone = loops.inbox_drop(root, from_inbox)
+            gone = loops.inbox_drop(root, from_inbox, action="triaged", commit=not no_commit)
             click.echo(f"triaged inbox item {from_inbox}: {gone['text']}")
     except loops.LoopError as e:
         _die(e)
@@ -567,17 +565,18 @@ def loop_add(title, due, next_, owner, area, prio, since, today, from_inbox, no_
 
 
 @loop.command("inbox")
-@click.option("--drop", type=int, default=None, help="Discard inbox item N.")
-@click.option("--clear", is_flag=True, help="Discard every inbox item.")
-def loop_inbox(drop, clear):
+@click.option("--drop", type=int, default=None, help="Discard inbox item N (remembered — never re-added).")
+@click.option("--clear", is_flag=True, help="Discard every inbox item (remembered — never re-added).")
+@click.option("--no-commit", is_flag=True)
+def loop_inbox(drop, clear, no_commit):
     """Show action items the extractor found (triage with `loop add --from-inbox N`)."""
     root = _vault_root()
     try:
         if drop is not None:
-            gone = loops.inbox_drop(root, drop)
+            gone = loops.inbox_drop(root, drop, commit=not no_commit)
             click.echo(f"dropped: {gone['text']}")
         if clear:
-            click.echo(f"cleared {loops.inbox_clear(root)} item(s)")
+            click.echo(f"cleared {loops.inbox_clear(root, commit=not no_commit)} item(s)")
     except loops.LoopError as e:
         _die(e)
     items = loops.inbox_list(root)
@@ -806,3 +805,10 @@ def area_touch(key, when, no_commit):
     if not no_commit:
         loops.git_commit(root, f"area {key}: touched")
     click.echo(f"{p.relative_to(root)} updated; NOW.md re-rendered")
+
+
+if __name__ == "__main__":
+    # keep at end of file: every command above must be registered before dispatch
+    # (`python cli.py loop ...` used to miss the vault-layer commands added below
+    # the old mid-file guard; the installed `brain` entry point hid that).
+    cli()

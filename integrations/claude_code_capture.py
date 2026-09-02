@@ -13,6 +13,11 @@ Design constraints:
   appends what it ingested (or why it skipped) to ~/.personal-brain/capture.log.
 - The brain's dedup means re-stating a known fact reinforces it, so repeated
   sessions converge instead of accumulating duplicates.
+- Each session carries an ingest watermark (~/.personal-brain/capture-state.json):
+  a long-lived session that ends repeatedly (resume → exit → resume) only ever
+  distills the turns typed since its last capture, instead of re-mining the whole
+  transcript — which is what fed the same Aug 31 action item into the loop inbox
+  three times on Sep 1 2026.
 
 Stdin: hook JSON ({"transcript_path": ..., "session_id": ...}).
 """
@@ -25,10 +30,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from brain import DATA_DIR, config, db, extract, llm
 
-MIN_USER_CHARS = 200       # below this a session can't contain much worth keeping
+MIN_USER_CHARS = 200       # below this the new turns can't contain much worth keeping
 MAX_USER_CHARS = 15000     # cap what we send to the distiller
 PER_MESSAGE_CAP = 2000
 LOG_PATH = DATA_DIR / "capture.log"
+STATE_PATH = DATA_DIR / "capture-state.json"
+STATE_MAX_AGE_DAYS = 45    # forget watermarks for sessions idle this long
 
 DISTILL_PROMPT = """Below are the messages a user typed to their coding assistant \
 during one session. Extract any DURABLE facts about the user worth keeping in \
@@ -57,12 +64,37 @@ def log(line: str):
         pass
 
 
+def load_state() -> dict:
+    """Per-session watermarks: {session_id: {"chars": <user text already mined>, "ts": ...}}.
+    A missing or corrupt file is an empty state, never an error."""
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+
+
+def save_state(state: dict):
+    """Persist watermarks, pruning sessions idle past STATE_MAX_AGE_DAYS."""
+    cutoff = time.time() - STATE_MAX_AGE_DAYS * 86400
+    state = {sid: rec for sid, rec in state.items()
+             if isinstance(rec, dict) and rec.get("ts", 0) >= cutoff}
+    try:
+        STATE_PATH.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def user_text_from_transcript(path: Path) -> str:
-    """Collect the human-typed text from a session transcript (JSONL).
+    """Collect ALL human-typed text from a session transcript (JSONL), in order.
 
     Tool results, slash-command expansions, and harness-injected reminders all
     arrive as "user" entries too — skip them; ambient capture must only ever
     see what the person themselves typed.
+
+    Returns the full text uncapped: the transcript is append-only, so the
+    result only ever grows by appending, and the caller's per-session watermark
+    (a character offset into this text) stays valid across captures.
     """
     pieces = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -83,8 +115,7 @@ def user_text_from_transcript(path: Path) -> str:
                                             "<task-notification")):
                 continue
             pieces.append(text[:PER_MESSAGE_CAP])
-    joined = "\n---\n".join(pieces)
-    return joined[-MAX_USER_CHARS:]  # the tail of a long session beats the head
+    return "\n---\n".join(pieces)
 
 
 def main():
@@ -101,7 +132,8 @@ def _capture():
     except (json.JSONDecodeError, ValueError):
         return
     transcript = Path(hook_input.get("transcript_path") or "")
-    session = (hook_input.get("session_id") or "unknown")[:8]
+    session_id = hook_input.get("session_id") or "unknown"
+    session = session_id[:8]
     if not transcript.is_file():
         return
     if not llm.have_key():
@@ -109,13 +141,28 @@ def _capture():
         return
 
     text = user_text_from_transcript(transcript)
-    if len(text) < MIN_USER_CHARS:
-        log(f"session {session}: skipped ({len(text)} chars of user text)")
+    state = load_state()
+    rec = state.get(session_id)
+    mark = rec.get("chars", 0) if isinstance(rec, dict) else 0
+    if not isinstance(mark, int) or not 0 <= mark <= len(text):
+        mark = 0   # transcript replaced or state damaged — re-mine from the start
+    new = text[mark:]
+    if len(new) < MIN_USER_CHARS:
+        log(f"session {session}: skipped ({len(new)} new chars of user text, "
+            f"{mark} already captured)")
         return
 
     user = config.get_user() or "the user"
-    facts = llm.generate(DISTILL_PROMPT.format(user=user, messages=text)).strip()
+    facts = llm.generate(DISTILL_PROMPT.format(user=user, messages=new[-MAX_USER_CHARS:])).strip()
+
+    def advance():
+        """Mark these turns as mined. Called only once they were actually handled —
+        an LLM/ingest failure leaves the watermark alone so the next end retries."""
+        state[session_id] = {"chars": len(text), "ts": time.time()}
+        save_state(state)
+
     if not facts or facts.upper().startswith("NONE"):
+        advance()
         log(f"session {session}: nothing durable")
         return
 
@@ -126,6 +173,7 @@ def _capture():
         )
     finally:
         conn.close()
+    advance()
     log(f"session {session}: ingested {len(node_ids)} node(s), {len(edge_ids)} edge(s) "
         f"from: {facts[:300]}")
 
