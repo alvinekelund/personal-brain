@@ -2,7 +2,7 @@
 import sys
 import click
 from brain import db, decay, extract, graph, visualize, config, portability, vault
-from brain import loops, decisions, doctor as doctor_mod
+from brain import loops, decisions, doctor as doctor_mod, now as now_mod
 from datetime import datetime as _dt
 
 
@@ -749,3 +749,60 @@ def doctor_cmd(brief, install_hooks, today):
     checks = doctor_mod.run(root, _parse_day(today))
     click.echo(doctor_mod.brief(checks) if brief else doctor_mod.report(checks))
     sys.exit(1 if doctor_mod.worst(checks) == "fail" else 0)
+
+
+@cli.group()
+def now():
+    """NOW.md — the generated 'what is going on' view (IDENTITY + loops + areas' ## Now + people + apps)."""
+
+
+@now.command("render")
+@click.option("--no-commit", is_flag=True)
+def now_render(no_commit):
+    """(Re)generate NOW.md from its sources. Replaces a hand-written NOW.md."""
+    root = _vault_root()
+    changed = now_mod.write(root)
+    if changed and not no_commit:
+        loops.git_commit(root, "now: render NOW.md")
+    click.echo("NOW.md rendered" if changed else "NOW.md already current")
+
+
+@now.command("show")
+def now_show():
+    """Print what NOW.md would contain right now."""
+    click.echo(now_mod.render_text(_vault_root()), nl=False)
+
+
+@now.command("lint")
+@click.option("--date", "today", default=None)
+def now_lint(today):
+    """Check NOW.md is current and every area/app/person file is well-formed and fresh. Exit 1 on errors."""
+    errors, warnings = now_mod.lint(_vault_root(), _parse_day(today))
+    for w in warnings:
+        click.echo(f"⚠ {w}")
+    for e in errors:
+        click.echo(f"✗ {e}")
+    if not errors:
+        click.echo(f"✓ NOW.md current ({len(warnings)} warning(s))")
+    sys.exit(1 if errors else 0)
+
+
+@cli.group()
+def area():
+    """areas/<area>.md — one file per life area with a `## Now` block."""
+
+
+@area.command("touch")
+@click.argument("key")
+@click.option("--date", "when", default=None, help="Set `updated:` to this date instead of today.")
+@click.option("--no-commit", is_flag=True)
+def area_touch(key, when, no_commit):
+    """Stamp `updated:` on an area (after editing its `## Now` block) and re-render NOW.md."""
+    root = _vault_root()
+    try:
+        p = now_mod.touch_area(root, key, _parse_day(when))
+    except now_mod.NowError as e:
+        _die(e)
+    if not no_commit:
+        loops.git_commit(root, f"area {key}: touched")
+    click.echo(f"{p.relative_to(root)} updated; NOW.md re-rendered")

@@ -267,9 +267,18 @@ def git_commit(root: Path, message: str) -> bool:
 
 # ── operations (each writes LOOPS.md, re-renders NOW.md, commits) ─────────────
 
+def refresh_now(root: Path, ledger: Ledger | None = None) -> bool:
+    """Re-render NOW.md: the whole file when it is generated (`brain now`),
+    else only the legacy marked block."""
+    from brain import now  # lazy: now.py imports this module
+    if now.is_generated(root):
+        return now.write(root)
+    return render_now(root, ledger)
+
+
 def _finish(root: Path, ledger: Ledger, message: str, commit: bool = True):
     save(root, ledger)
-    render_now(root, ledger)
+    refresh_now(root, ledger)
     if commit:
         git_commit(root, message)
 
@@ -405,7 +414,8 @@ def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
     for l in ledger.all():
         seen[l.id] = seen.get(l.id, 0) + 1
     errors += [f"duplicate id {i}" for i, n in seen.items() if n > 1]
-    stale = now_block_stale(root, ledger)
+    from brain import now
+    stale = now.stale(root) if now.is_generated(root) else now_block_stale(root, ledger)
     if stale:
         errors.append(stale)
     for l in ledger.open:

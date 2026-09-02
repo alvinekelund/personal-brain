@@ -24,6 +24,8 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Synthesis** — `brain synthesize` finds isolated nodes and connects them to the graph, surfacing relationships Gemini notices across your knowledge.
 
+**Generated NOW.md** — the vault's "what is going on" view is never hand-written. `brain now render` composes it from files that each have one writer: `IDENTITY.md` (a curated paragraph), `LOOPS.md` (open loops grouped by area), every `areas/<area>.md` front-matter (`area:`, `updated:`, `aliases:`) plus its `## Now` block (≤4 lines), `people/*.md` and `apps/*.md` front-matter. `brain now lint` proves NOW.md is current and flags an area whose `updated:` is older than a log entry that mentions one of its aliases — the fact moved, the area did not. Together with `brain today` (what to do, time-sorted) and the agent's rules file (how to behave), a session reads three things with three distinct jobs.
+
 **Action layer** — `LOOPS.md` (one loop per line in a strict grammar: id, title, due, owner alvin/claude/waiting:<who>, area, prio, next action) and `DECISIONS.md` (append-only: decision, why, rejected, revisit-if). Both are written only by `brain loop` / `brain decide`; `lint` fails on hand edits and a git pre-commit hook rejects removals from the decision ledger. NOW.md's "hot" section is rendered from the loops. `brain today` turns them into a deterministic action card (countdowns, aging waits, Claude-owned loops, top 3 next actions) and `brain doctor` checks the whole wiring — binary, DB, key, vault freshness, hooks, MCP registration, scheduled tasks — so a broken brain announces itself at session start instead of failing silently.
 
 **Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
@@ -138,7 +140,9 @@ brain loop inbox [--drop N | --clear]            # action items the extractor fo
 brain decide "Fourth-seat plan of record" --what "..." --why "..." --rejected "..." --revisit "..."
 brain decisions [--last 5] [--lint]              # DECISIONS.md is append-only (git pre-commit enforced)
 brain today [--brief] [--date YYYY-MM-DD]        # action card: health line, countdowns, waits, Claude-owned loops, top 3
-brain doctor [--brief] [--install-hooks]         # binary, graph, key, vault freshness, ledgers, hooks, MCP, scheduled tasks
+brain doctor [--brief] [--install-hooks]         # binary, graph, key+TLS, vault freshness, ledgers, NOW.md, hooks, MCP, scheduled tasks
+brain now render | show | lint                   # NOW.md is GENERATED: IDENTITY.md + loops by area + areas/*.md `## Now` + people + apps
+brain area touch harvard                         # stamp `updated:` on areas/harvard.md after editing its `## Now` block; re-renders NOW.md
 
 # Maintenance
 brain digest                     # at-a-glance: top of mind, open loops (from LOOPS.md), fading, by area

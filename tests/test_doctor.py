@@ -70,10 +70,13 @@ class DoctorTests(unittest.TestCase):
         return doctor.run(**args)
 
     def test_healthy_setup(self):
+        import brain.now as now
+        (self.root / "IDENTITY.md").write_text("**Alvin**\n")
         loops.add(self.root, "A", "2026-09-09", "alvin", "jobs", "n", today=TODAY, commit=False)
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
+        now.write(self.root)                      # NOW.md becomes generated → the now.md check applies
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "gemini-key", "gemini-api", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "gemini-key", "gemini-api", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -101,7 +104,8 @@ class DoctorTests(unittest.TestCase):
         checks = by_name(self.run_doctor())
         self.assertEqual(checks["graph"].status, "warn")
         self.assertIn("80h", checks["graph"].detail)
-        self.assertEqual(checks["now.md"].status, "warn")
+        self.assertEqual(checks["vault-activity"].status, "warn")
+        self.assertEqual(checks["now.md"].status, "warn")     # legacy hand-written NOW.md in this fixture
 
     def test_missing_key_and_ledgers_warn(self):
         llm.have_key = lambda: False

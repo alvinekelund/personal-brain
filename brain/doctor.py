@@ -118,7 +118,7 @@ def check_vault(root: Path, today: date | None = None, now: float | None = None)
         out.append(Check("vault", "fail", "NOW.md missing"))
         return out
     age = _age_h(now_md.stat().st_mtime, now)
-    out.append(Check("now.md", "warn" if age > STALE_HOURS else "ok", f"updated {age:.0f}h ago"))
+    out.append(Check("vault-activity", "warn" if age > STALE_HOURS else "ok", f"NOW.md last written {age:.0f}h ago"))
 
     if not loops.loops_path(root).is_file():
         out.append(Check("loops", "warn", "LOOPS.md missing — `brain loop add` creates it"))
@@ -139,6 +139,19 @@ def check_vault(root: Path, today: date | None = None, now: float | None = None)
         n = len(decisions.load(root)[0])
         out.append(Check("decisions", "fail" if errs else "ok",
                          f"{n} entries" + (" · " + "; ".join(errs[:3]) if errs else "")))
+
+    from brain import now
+    if now.is_generated(root):
+        n_err, n_warn = now.lint(root, today)
+        n_err = [e for e in n_err if "LOOPS" not in e]   # loop problems are reported above
+        if n_err:
+            out.append(Check("now.md", "fail", f"{len(n_err)} error(s): " + "; ".join(n_err[:3])))
+        elif n_warn:
+            out.append(Check("now.md", "warn", "; ".join(n_warn[:3])))
+        else:
+            out.append(Check("now.md", "ok", "generated, current; areas fresh"))
+    else:
+        out.append(Check("now.md", "warn", "hand-written — `brain now render` makes it generated from IDENTITY/LOOPS/areas/people/apps"))
 
     git_dir = root / ".git"
     if git_dir.is_dir():
