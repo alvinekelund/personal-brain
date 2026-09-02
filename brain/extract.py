@@ -234,6 +234,12 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
             existing = db.get_node_by_name(conn, parent)
             parent_id = existing["id"] if existing else ensure_category(parent)
         if parent_id and parent_id != child_id:
+            # one part_of parent per node: the planned parent replaces any other
+            child_node = db.get_node(conn, child_id)
+            for e in db.edges_for_node(conn, child_id):
+                if (e["source_id"] == child_id and e["relation"] == "part_of" and e["target_id"] != parent_id
+                        and not (child_node and child_node["type"] == "category")):
+                    db.delete_edge(conn, e["id"])
             new_edges.append(db.add_edge(conn, child_id, parent_id, "part_of"))
 
     if not identity:

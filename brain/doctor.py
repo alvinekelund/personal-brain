@@ -102,6 +102,54 @@ def check_api(probe=None) -> Check:
     return Check("gemini-api", "ok", "reachable")
 
 
+def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
+    """Is the hierarchy still a tree? Orphans, multi-parent nodes, unrooted categories,
+    cycles, legacy task nodes, near-duplicate names, missing embeddings."""
+    import sqlite3
+    from brain import config, integrity
+    if not Path(db_path).is_file():
+        return Check("graph-tree", "fail", f"{db_path} missing")
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        rep = integrity.check(conn, user or config.get_user())
+        conn.close()
+    except sqlite3.Error as e:
+        return Check("graph-tree", "fail", f"cannot read graph: {e}")
+    if rep.structural or rep.legacy_tasks:
+        return Check("graph-tree", "fail", rep.summary() + " — `brain doctor --repair`")
+    if rep.duplicates or rep.missing_embeddings:
+        detail = rep.summary()
+        if rep.duplicates:
+            detail += ": " + "; ".join(f"{a} ~ {b}" for a, b in rep.duplicates[:3]) + " (brain merge)"
+        return Check("graph-tree", "warn", detail)
+    return Check("graph-tree", "ok", rep.summary())
+
+
+def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None = None) -> Check:
+    """Ambient capture: did the last runs succeed, and when did one last ingest?"""
+    import re
+    now = now or time.time()
+    if not Path(log_path).is_file():
+        return Check("capture", "warn", "no capture.log yet — the SessionEnd hook has never run")
+    lines = Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+    recent_err = [l for l in lines if " error:" in l]
+    last = lines[-1] if lines else ""
+    m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last)
+    age_h = None
+    if m:
+        try:
+            age_h = _age_h(time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")), now)
+        except ValueError:
+            age_h = None
+    if recent_err and recent_err[-1] == last:
+        return Check("capture", "fail", f"last run failed: {last[20:140]}")
+    tail = last[20:110]
+    if age_h is not None and age_h > 72:
+        return Check("capture", "warn", f"last run {age_h:.0f}h ago: {tail}")
+    return Check("capture", "ok", f"last run {age_h:.0f}h ago: {tail}" if age_h is not None else tail)
+
+
 def check_key() -> Check:
     return (Check("gemini-key", "ok", "present") if llm.have_key()
             else Check("gemini-key", "warn", "no GEMINI_API_KEY — brain add / capture / ask are disabled"))
@@ -236,8 +284,12 @@ def check_wiring(settings: Path | None = CLAUDE_SETTINGS, claude_json: Path | No
 def run(root: Path, today: date | None = None, now: float | None = None,
         db_path: Path = DB_PATH, expected_bin: Path = EXPECTED_BIN,
         settings: Path | None = CLAUDE_SETTINGS, claude_json: Path | None = CLAUDE_JSON,
-        tasks_dir: Path | None = SCHEDULED_TASKS, api_probe=None) -> list[Check]:
-    checks = [check_binary(expected_bin), check_db(db_path, now), check_key(), check_api(api_probe)]
+        tasks_dir: Path | None = SCHEDULED_TASKS, api_probe=None,
+        capture_log: Path | None = DATA_DIR / "capture.log") -> list[Check]:
+    checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
+              check_key(), check_api(api_probe)]
+    if capture_log is not None:
+        checks.append(check_capture(capture_log, now))
     checks += check_vault(root, today, now)
     checks += check_wiring(settings, claude_json, tasks_dir)
     return checks

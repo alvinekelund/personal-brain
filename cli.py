@@ -739,15 +739,36 @@ def today(today, days, brief, no_doctor):
 @cli.command("doctor")
 @click.option("--brief", is_flag=True, help="One summary line.")
 @click.option("--install-hooks", is_flag=True, help="Install the vault's append-only pre-commit hook.")
+@click.option("--repair", is_flag=True, help="Fix structural graph problems (orphans, multi-parent, cycles) first.")
 @click.option("--date", "today", default=None)
-def doctor_cmd(brief, install_hooks, today):
-    """Health check: binary, graph, key, vault freshness, ledgers, hooks, MCP, scheduled tasks. Exit 1 on failure."""
+def doctor_cmd(brief, install_hooks, repair, today):
+    """Health check: binary, graph + tree integrity, key, API, capture, vault, ledgers, hooks, MCP, tasks. Exit 1 on failure."""
     root = _vault_root()
     if install_hooks:
         click.echo("pre-commit hook: " + ("installed" if decisions.install_pre_commit(root) else "vault is not a git repo"))
+    if repair:
+        _repair()
     checks = doctor_mod.run(root, _parse_day(today))
     click.echo(doctor_mod.brief(checks) if brief else doctor_mod.report(checks))
     sys.exit(1 if doctor_mod.worst(checks) == "fail" else 0)
+
+
+def _repair():
+    from brain import integrity
+    conn = db.connect()
+    before = integrity.check(conn, config.get_user())
+    fixed = integrity.repair(conn, config.get_user())
+    after = integrity.check(conn, config.get_user())
+    vault.auto_render(conn, config.get_user())
+    click.echo("repair: " + ", ".join(f"{k}={v}" for k, v in fixed.items() if v) if any(fixed.values()) else "repair: nothing structural to fix")
+    click.echo(f"before: {before.summary()}\nafter:  {after.summary()}")
+    return after
+
+
+@cli.command("repair")
+def repair_cmd():
+    """Make the hierarchy a tree again: one parent per node, categories under you, no orphans or cycles."""
+    _repair()
 
 
 @cli.group()

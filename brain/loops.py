@@ -253,10 +253,24 @@ def save(root: Path, ledger: Ledger):
     loops_path(root).write_text(serialize(ledger), encoding="utf-8")
 
 
+def _guarded_root(root: Path) -> bool:
+    """True if committing here is allowed. A test process (unittest imported) must
+    never commit the REAL vault — in Sep 2026 a test run left eight commits in it."""
+    import sys
+    from brain import DATA_DIR
+    if "unittest" in sys.modules:
+        try:
+            if Path(root).resolve() == (DATA_DIR / "vault").resolve():
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def git_commit(root: Path, message: str) -> bool:
     """Commit the vault if it is a git repo and something changed. Never raises."""
     root = Path(root)
-    if not (root / ".git").exists():
+    if not (root / ".git").exists() or not _guarded_root(root):
         return False
     try:
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
@@ -274,7 +288,7 @@ def git_commit_paths(root: Path, paths: list[str], message: str) -> bool:
     Used for writes that happen inside a larger operation (extractor ingest,
     inbox triage) so machine-generated churn gets its own commit. Never raises."""
     root = Path(root)
-    if not (root / ".git").exists():
+    if not (root / ".git").exists() or not _guarded_root(root):
         return False
     present = [p for p in paths if (root / p).exists()]  # a missing pathspec is fatal to git
     if not present:
@@ -451,6 +465,24 @@ def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
         if l.waiting_on and age > WAITING_NAG_DAYS:
             warnings.append(f"{l.id} waiting on {l.waiting_on} for {age}d — nudge")
     return errors, warnings
+
+
+# ── search (for brain ask / brain_context) ────────────────────────────────────
+
+def search(root: Path, query: str, limit: int = 5, include_closed: bool = False) -> list[Loop]:
+    """Loops whose title/next/note share keywords with the query, best first (open before closed)."""
+    from brain.decisions import _tokens
+    q = _tokens(query)
+    if not q:
+        return []
+    ledger = load(root)
+    scored = []
+    for l in ledger.open + (ledger.closed if include_closed else []):
+        hit = len(q & _tokens(" ".join([l.title, l.next, l.note, l.area])))
+        if hit:
+            scored.append((hit, 0 if not l.closed else 1, l))
+    scored.sort(key=lambda x: (-x[0], x[1], x[2].id))
+    return [l for _, _, l in scored[:limit]]
 
 
 # ── today ─────────────────────────────────────────────────────────────────────

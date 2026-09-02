@@ -189,3 +189,30 @@ def install_pre_commit(root: Path) -> bool:
     target.write_text(PRE_COMMIT_HOOK, encoding="utf-8")
     target.chmod(0o755)
     return True
+
+
+_WORD = re.compile(r"[a-z0-9][a-z0-9.+-]{2,}")
+
+
+def _tokens(text: str) -> set[str]:
+    return {w for w in _WORD.findall(text.lower()) if w not in _STOP}
+
+
+_STOP = {"the", "and", "for", "with", "that", "this", "from", "into", "about", "what", "when",
+         "where", "which", "does", "did", "have", "has", "are", "was", "were", "not", "you", "your",
+         "alvin", "alvins", "his", "her", "how", "why", "who", "will", "should", "could", "would"}
+
+
+def search(root: Path, query: str, limit: int = 5) -> list[Decision]:
+    """Decisions whose title/decision/why share keywords with the query, best first."""
+    q = _tokens(query)
+    if not q:
+        return []
+    scored = []
+    for d in load(root)[0]:
+        hay = _tokens(" ".join([d.title, d.decision, d.why, d.rejected, d.revisit]))
+        hit = len(q & hay)
+        if hit:
+            scored.append((hit, d))
+    scored.sort(key=lambda x: (-x[0], x[1].id))
+    return [d for _, d in scored[:limit]]

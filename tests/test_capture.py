@@ -23,9 +23,12 @@ def transcript(tmp, entries):
     return p
 
 
-def user_msg(text):
-    return {"type": "user", "message": {"role": "user",
-                                        "content": [{"type": "text", "text": text}]}}
+def user_msg(text, timestamp=None):
+    e = {"type": "user", "message": {"role": "user",
+                                     "content": [{"type": "text", "text": text}]}}
+    if timestamp:
+        e["timestamp"] = timestamp
+    return e
 
 
 class CaptureTestCase(unittest.TestCase):
@@ -35,6 +38,10 @@ class CaptureTestCase(unittest.TestCase):
         db.DB_PATH = os.path.join(self._tmp, "brain.db")
         self._orig_config_path = config.CONFIG_PATH
         config.CONFIG_PATH = Path(self._tmp) / "config.json"
+        (Path(self._tmp) / "vault").mkdir()
+        config.save({"vault_dir": str(Path(self._tmp) / "vault")})   # never the real vault
+        self._orig_seen = capture.SEEN_PATH
+        capture.SEEN_PATH = Path(self._tmp) / "capture-seen.jsonl"
         self._orig_log = capture.LOG_PATH
         capture.LOG_PATH = Path(self._tmp) / "capture.log"
         self._orig_state = capture.STATE_PATH
@@ -47,6 +54,7 @@ class CaptureTestCase(unittest.TestCase):
     def tearDown(self):
         db.DB_PATH = self._orig_db_path
         config.CONFIG_PATH = self._orig_config_path
+        capture.SEEN_PATH = self._orig_seen
         capture.LOG_PATH = self._orig_log
         capture.STATE_PATH = self._orig_state
         llm.have_key = self._orig_have_key
@@ -244,6 +252,54 @@ class WatermarkTests(CaptureTestCase):
         state = json.loads(capture.STATE_PATH.read_text())
         self.assertNotIn("ancient", state)
         self.assertIn("sess-new", state)
+
+
+class StalenessAndDedupTests(CaptureTestCase):
+    LONG = ("I have decided to enroll in the robotics course this fall and keep the statistics "
+            "course as well, this is my settled plan going forward for the semester. ")
+
+    def test_turns_older_than_the_window_are_ignored(self):
+        import datetime
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)).isoformat().replace("+00:00", "Z")
+        new = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        t = transcript(self._tmp, [user_msg("Ancient plan: pursue 6.7960 " + self.LONG, old),
+                                   user_msg("Fresh: " + self.LONG, new),
+                                   user_msg("No timestamp at all " + self.LONG)])
+        text = capture.user_text_from_transcript(t)
+        self.assertNotIn("Ancient plan", text)
+        self.assertIn("Fresh:", text)
+        self.assertIn("No timestamp", text)     # untimestamped turns are kept (can't judge them)
+
+    def test_automation_sessions_are_skipped_without_llm(self):
+        llm.have_key = lambda: True
+        llm.generate = lambda *a, **k: self.fail("automation prompts must never reach the distiller")
+        t = transcript(self._tmp, [user_msg("---\nname: nightly-brain-sync\n---\nNightly sync of Alvin's brain " + self.LONG * 3)])
+        self.run_hook(t)
+        self.assertIn("automation session", self.log_text())
+        self.assertTrue(capture.is_automation("Send it with the PushNotification tool"))
+        self.assertFalse(capture.is_automation("I want to push my notification settings"))
+
+    def test_repeated_fact_is_not_ingested_twice(self):
+        llm.have_key = lambda: True
+        calls = {"ingest": 0}
+        def gen(prompt, *a, **k):
+            if "DURABLE facts" in prompt:
+                return "Alvin keeps STAT 211 this fall. Alvin's boss is Heli."
+            calls["ingest"] += 1
+            return json.dumps({"nodes": [{"name": "STAT 211", "type": "concept", "content": "kept"}], "edges": []}) \
+                if calls["ingest"] % 2 else "{}"
+        llm.generate = gen
+        llm.embed = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))
+        self.run_hook(transcript(self._tmp, [user_msg("First session " + self.LONG * 2)]), session_id="s1")
+        self.assertIn("ingested", self.log_text())
+        self.assertEqual(len(capture.seen_facts()), 2)
+        # a second session restating the same two facts → nothing reaches the extractor
+        before = calls["ingest"]
+        self.run_hook(transcript(self._tmp, [user_msg("Second session " + self.LONG * 2)]), session_id="s2")
+        self.assertEqual(calls["ingest"], before)
+        self.assertIn("already captured", self.log_text())
+        fresh, dropped = capture.new_facts_only("Alvin keeps STAT 211 this fall. Alvin moved to Boston.")
+        self.assertEqual((fresh, dropped), (["Alvin moved to Boston."], 1))
 
 
 if __name__ == "__main__":

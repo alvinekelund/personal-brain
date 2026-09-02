@@ -28,6 +28,12 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Action layer** — `LOOPS.md` (one loop per line in a strict grammar: id, title, due, owner alvin/claude/waiting:<who>, area, prio, next action) and `DECISIONS.md` (append-only: decision, why, rejected, revisit-if). Both are written only by `brain loop` / `brain decide`; `lint` fails on hand edits and a git pre-commit hook rejects removals from the decision ledger. NOW.md's "hot" section is rendered from the loops. `brain today` turns them into a deterministic action card (countdowns, aging waits, Claude-owned loops, top 3 next actions) and `brain doctor` checks the whole wiring — binary, DB, key, vault freshness, hooks, MCP registration, scheduled tasks — so a broken brain announces itself at session start instead of failing silently.
 
+**Tree integrity** — the person-rooted hierarchy is checked on every `brain doctor`: orphans, nodes with more than one `part_of` parent, categories not hanging off the person, cycles, legacy task nodes, near-duplicate names (including a bare first name vs a full name), and nodes without embeddings. `brain repair` fixes the structural ones deterministically and never deletes a node. Ingest and reorganize keep the invariant at write time: a planned parent replaces the old one.
+
+**Ambient capture that resists replay** — the SessionEnd hook ignores turns older than 36 hours (a resumed old session is not today's truth), skips automation sessions (scheduled-task prompts), tells the distiller to keep only the latest state when a plan is superseded, and hashes every distilled fact into `~/.personal-brain/capture-seen.jsonl` so a fact re-stated in a later session is never ingested twice. Every run is logged; `brain doctor` reports the last one.
+
+**Ledger-aware answers** — `brain ask` / `brain_ask` put matching decisions (with their revisit triggers) and loops in front of the graph nodes, and cite their ids as sources, so "what did I decide about X" is answered from the ledger rather than from whatever the graph happened to extract.
+
 **Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
 
 **Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt. Each session carries an ingest watermark (`capture-state.json`), so a long-lived session that ends repeatedly only ever mines the turns typed since its last capture — never the whole transcript again.
@@ -144,7 +150,8 @@ brain loop inbox [--drop N | --clear]            # action items the extractor fo
 brain decide "Fourth-seat plan of record" --what "..." --why "..." --rejected "..." --revisit "..."
 brain decisions [--last 5] [--lint]              # DECISIONS.md is append-only (git pre-commit enforced)
 brain today [--brief] [--date YYYY-MM-DD]        # action card: health line, countdowns, waits, Claude-owned loops, top 3
-brain doctor [--brief] [--install-hooks]         # binary, graph, key+TLS, vault freshness, ledgers, NOW.md, hooks, MCP, scheduled tasks
+brain doctor [--brief] [--install-hooks] [--repair]  # binary, graph + tree integrity, key+TLS, capture, vault, ledgers, NOW.md, hooks, MCP, tasks
+brain repair                                     # one parent per node, categories under you, no orphans/cycles (never deletes)
 brain now render | show | lint                   # NOW.md is GENERATED: IDENTITY.md + loops by area + areas/*.md `## Now` + people + apps
 brain area touch harvard                         # stamp `updated:` on areas/harvard.md after editing its `## Now` block; re-renders NOW.md
 

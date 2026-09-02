@@ -51,6 +51,8 @@ class DoctorTests(unittest.TestCase):
             {"type": "command", "command": f"{self.bin} today"}]}]}}))
         self.claude_json = self.tmp / "claude.json"
         self.claude_json.write_text(json.dumps({"mcpServers": {"brain": {"command": str(self.bin), "args": ["mcp"]}}}))
+        self.capture_log = self.tmp / "capture.log"
+        self.capture_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " session abc: ingested 2 node(s)\n")
         self.tasks = self.tmp / "scheduled-tasks"
         (self.tasks / "nightly").mkdir(parents=True)
         (self.tasks / "nightly" / "SKILL.md").write_text(f"run {self.bin} add \"fact\"\n")
@@ -65,7 +67,7 @@ class DoctorTests(unittest.TestCase):
             raise urllib.error.HTTPError("https://x/", 404, "nf", {}, None)
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
                     settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
-                    api_probe=reachable)
+                    api_probe=reachable, capture_log=self.capture_log)
         args.update(kw)
         return doctor.run(**args)
 
@@ -76,7 +78,7 @@ class DoctorTests(unittest.TestCase):
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
         now.write(self.root)                      # NOW.md becomes generated → the now.md check applies
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "gemini-key", "gemini-api", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "graph-tree", "gemini-key", "gemini-api", "capture", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -145,6 +147,17 @@ class DoctorTests(unittest.TestCase):
             raise OSError("Network is unreachable")
         self.assertEqual(doctor.check_api(offline).status, "warn")
         self.assertEqual(by_name(self.run_doctor())["gemini-api"].status, "ok")
+
+    def test_graph_tree_and_capture_checks(self):
+        conn = db.connect()
+        db.add_node(conn, "Loose fact", type_="fact")          # orphan → structural failure
+        conn.commit(); conn.close()
+        self.assertEqual(by_name(self.run_doctor())["graph-tree"].status, "fail")
+        self.assertIn("orphan", by_name(self.run_doctor())["graph-tree"].detail)
+        self.capture_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " error: RuntimeError: boom\n")
+        self.assertEqual(by_name(self.run_doctor())["capture"].status, "fail")
+        self.capture_log.unlink()
+        self.assertEqual(by_name(self.run_doctor())["capture"].status, "warn")
 
     def test_unregistered_mcp_is_a_warning(self):
         self.claude_json.write_text(json.dumps({"mcpServers": {}}))

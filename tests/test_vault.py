@@ -26,7 +26,7 @@ class VaultTestCase(BrainTestCase):
         super().setUp()
         self.vault_root = Path(tempfile.mkdtemp())
         self._orig_config_load = config.load
-        config.load = lambda: {}
+        config.load = lambda: {"vault_dir": str(self.vault_root)}   # never the real vault
 
     def tearDown(self):
         config.load = self._orig_config_load

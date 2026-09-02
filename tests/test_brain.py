@@ -42,6 +42,7 @@ class BrainTestCase(unittest.TestCase):
         # hermetic by default: no test should hit the network unless it opts in
         # by mocking llm. (_load_dotenv may have loaded a real key into the env.)
         self._orig_have_key = llm.have_key
+        self._orig_generate = llm.generate
         llm.have_key = lambda: False
         # the vault (LOOPS.md, LOOPS-INBOX.md) is resolved through config — point it at
         # a temp dir so digest/ingest never read or write the real one
@@ -55,6 +56,7 @@ class BrainTestCase(unittest.TestCase):
         self.conn.close()
         db.DB_PATH = self._orig_db_path
         llm.have_key = self._orig_have_key
+        llm.generate = self._orig_generate
         config.CONFIG_PATH = self._orig_config_path
 
     def _age(self, node_id, days):
@@ -302,6 +304,45 @@ class IngestTests(BrainTestCase):
         self.conn.commit()
         extract.merge_into_db(self.conn, {"nodes": [], "edges": []}, "reorganize", "", user="Alvin")
         self.assertTrue(any(e["target_id"] == ident for e in db.edges_for_node(self.conn, untouched)))
+
+    def test_planned_parent_replaces_old_parent(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        edu = db.add_node(self.conn, "Education", type_="category"); db.add_edge(self.conn, edu, me, "part_of")
+        career = db.add_node(self.conn, "Career", type_="category"); db.add_edge(self.conn, career, me, "part_of")
+        ds = db.add_node(self.conn, "Data Science", type_="concept"); db.add_edge(self.conn, ds, edu, "part_of")
+        self.conn.commit()
+        extract.merge_into_db(self.conn, {"nodes": [{"name": "Data Science", "parent": "Career"}], "edges": []},
+                              "reorganize", "", user="Alvin")
+        parents = [db.get_node(self.conn, e["target_id"])["name"] for e in db.edges_for_node(self.conn, ds)
+                   if e["source_id"] == ds and e["relation"] == "part_of"]
+        self.assertEqual(parents, ["Career"])
+
+    def test_answer_question_sees_decisions_and_loops(self):
+        import brain.decisions as decisions
+        import brain.loops as loops
+        decisions.append(self.vault_tmp, "Fourth-seat plan of record", "Take MIT 9.522 as the fourth seat.",
+                         "best fit with the enrolled three", revisit="Protopapas allows late arrival",
+                         when=__import__("datetime").date(2026, 9, 1), commit=False)
+        loops.add(self.vault_tmp, "Lock the fourth fall course seat", "2026-09-09", "alvin", "harvard",
+                  "click Enroll Selected", today=__import__("datetime").date(2026, 9, 1), commit=False)
+        db.add_node(self.conn, "MIT 9.522", type_="concept", content="Statistical RL, exam-free.")
+        self.conn.commit()
+        seen = {}
+        llm.generate = lambda prompt, *a, **k: seen.setdefault("prompt", prompt) and "9.522, per D-001."
+        try:
+            res = graph.answer_question(self.conn, "what did I decide about the fourth seat 9.522?")
+        finally:
+            llm.generate = self._orig_generate if hasattr(self, "_orig_generate") else llm.generate
+        self.assertIn("D-001 (2026-09-01) Fourth-seat plan of record", seen["prompt"])
+        self.assertIn("Revisit if: Protopapas", seen["prompt"])
+        self.assertIn("L-001 Lock the fourth fall course seat (due 2026-09-09, owner alvin)", seen["prompt"])
+        self.assertEqual(res["sources"][:2], ["D-001", "L-001"])
+        self.assertIn("MIT 9.522", res["sources"])
+        # ledger-only question, nothing in the graph → still answered from the ledgers
+        res2 = graph.answer_question(self.conn, "when is the fourth seat lock due?")
+        self.assertNotEqual(res2["answer"], "I don't have anything on that yet.")
+        self.assertIn("L-001", res2["sources"])
 
     def test_ingest_routes_tasks_to_inbox_not_graph(self):
         """The prompt's `tasks` list AND any stray task-typed node both land in

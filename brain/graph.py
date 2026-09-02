@@ -239,7 +239,7 @@ def semantic_search(conn, query_vector: list, min_weight: float = 0.0, limit: in
 
 
 def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
-                    history: list | None = None) -> dict:
+                    history: list | None = None, ledger_root=None) -> dict:
     """Answer a natural-language question from the brain: retrieve the most
     relevant nodes (semantic, falling back to keyword) and have the LLM answer
     using only them. Accessing them reinforces them. Returns {answer, sources}.
@@ -258,7 +258,8 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
         seeds = []
     if not seeds:
         seeds = db.search_nodes(conn, retrieval_q, min_weight=min_weight)[:k]
-    if not seeds:
+    ledger_lines, ledger_sources = ledger_context(retrieval_q, ledger_root)
+    if not seeds and not ledger_lines:
         return {"answer": "I don't have anything on that yet.", "sources": []}
 
     # pull in 1-hop neighbors of the matches for connected context (capped)
@@ -275,6 +276,8 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
             break
 
     lines = [f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in seeds]
+    if ledger_lines:
+        lines = ledger_lines + ["Graph:"] + lines if lines else ledger_lines
     if neighbors:
         lines.append("Related:")
         lines += [f"- {o['name']} ({o['type']}): {o['content'] or ''}"
@@ -291,7 +294,34 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
     for n in seeds:  # asking accesses these memories → reinforce them
         db.touch_node(conn, n["id"])
     conn.commit()
-    return {"answer": llm.generate(prompt).strip(), "sources": [n["name"] for n in seeds]}
+    return {"answer": llm.generate(prompt).strip(), "sources": ledger_sources + [n["name"] for n in seeds]}
+
+
+def ledger_context(query: str, root=None) -> tuple[list[str], list[str]]:
+    """Decisions and loops matching the query, as prompt lines + source ids. The
+    ledgers hold the most valuable facts (what was settled, what is pending), so
+    every answer sees them first. Missing vault → nothing."""
+    from brain import config, decisions, loops
+    root = Path(root) if root is not None else config.vault_dir()
+    lines, sources = [], []
+    try:
+        ds = decisions.search(root, query)
+        ls = loops.search(root, query, include_closed=True)
+    except Exception:
+        return [], []
+    if ds:
+        lines.append("Decisions (settled — cite the id):")
+        for d in ds:
+            lines.append(f"- {d.id} ({d.date}) {d.title}: {d.decision} Why: {d.why}"
+                         + (f" Revisit if: {d.revisit}" if d.revisit not in ("", "—") else ""))
+            sources.append(d.id)
+    if ls:
+        lines.append("Loops (open unless marked done):")
+        for l in ls:
+            state = f"done {l.done}" if l.closed else f"due {l.due}, owner {l.owner}"
+            lines.append(f"- {l.id} {l.title} ({state}): next {l.next}")
+            sources.append(l.id)
+    return lines, sources
 
 
 def query_nodes(conn, query: str, min_weight: float = 0.0) -> list:
