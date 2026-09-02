@@ -37,6 +37,8 @@ class CaptureTestCase(unittest.TestCase):
         config.CONFIG_PATH = Path(self._tmp) / "config.json"
         self._orig_log = capture.LOG_PATH
         capture.LOG_PATH = Path(self._tmp) / "capture.log"
+        self._orig_state = capture.STATE_PATH
+        capture.STATE_PATH = Path(self._tmp) / "capture-state.json"
         self._orig_have_key = llm.have_key
         self._orig_generate = llm.generate
         self._orig_embed = llm.embed
@@ -46,6 +48,7 @@ class CaptureTestCase(unittest.TestCase):
         db.DB_PATH = self._orig_db_path
         config.CONFIG_PATH = self._orig_config_path
         capture.LOG_PATH = self._orig_log
+        capture.STATE_PATH = self._orig_state
         llm.have_key = self._orig_have_key
         llm.generate = self._orig_generate
         llm.embed = self._orig_embed
@@ -90,11 +93,14 @@ class TranscriptParsingTests(CaptureTestCase):
         p.write_text("not json\n" + json.dumps(user_msg("still works")))
         self.assertIn("still works", capture.user_text_from_transcript(p))
 
-    def test_long_session_keeps_the_tail(self):
+    def test_full_text_returned_in_order(self):
+        """The extractor returns everything (uncapped) so the caller's watermark —
+        a character offset — stays valid; the distill cap is applied at the call."""
         msgs = [user_msg(f"message number {i} " + "x" * 500) for i in range(60)]
         text = capture.user_text_from_transcript(transcript(self._tmp, msgs))
-        self.assertLessEqual(len(text), capture.MAX_USER_CHARS)
+        self.assertIn("message number 0", text)
         self.assertIn("message number 59", text)
+        self.assertLess(text.index("message number 0"), text.index("message number 59"))
 
 
 class HookBehaviourTests(CaptureTestCase):
@@ -153,6 +159,91 @@ class HookBehaviourTests(CaptureTestCase):
         t = transcript(self._tmp, [user_msg("x" * 300)])
         self.run_hook(t)  # must swallow the RuntimeError
         self.assertIn("error: RuntimeError: quota gone", self.log_text())
+
+
+class WatermarkTests(CaptureTestCase):
+    """A session that ends repeatedly must only mine the turns typed since its
+    last capture — re-distilling the whole transcript is what pushed the same
+    Aug 31 action item into the loop inbox three times on Sep 1 2026."""
+
+    def fake_llm(self, distill_reply="Alvin lives in Boston."):
+        """generate() stub: records every distill prompt, answers the rest of
+        the pipeline (extraction, entity linking) with harmless empty JSON."""
+        calls = []
+
+        def gen(prompt, *a, **k):
+            if prompt.startswith("Below are the messages"):
+                calls.append(prompt)
+                return distill_reply
+            return "{}"
+
+        llm.have_key = lambda: True
+        llm.generate = gen
+        llm.embed = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))
+        return calls
+
+    def test_repeat_capture_skips_already_mined_turns(self):
+        t = transcript(self._tmp, [user_msg("Deciding on MIT cross-registration. " + "x" * 300)])
+        calls = self.fake_llm()
+        self.run_hook(t, session_id="5f2be1cf-0000-0000")
+        self.assertEqual(len(calls), 1)
+        self.run_hook(t, session_id="5f2be1cf-0000-0000")   # ends again, no new turns
+        self.assertEqual(len(calls), 1)                      # nothing re-mined
+        self.assertIn("already captured", self.log_text())
+
+    def test_recapture_distills_only_new_turns(self):
+        entries = [user_msg("OLD TURN about course planning. " + "x" * 300)]
+        t = transcript(self._tmp, entries)
+        calls = self.fake_llm()
+        self.run_hook(t, session_id="sess-incr")
+        entries.append(user_msg("NEW TURN about the marathon. " + "y" * 300))
+        transcript(self._tmp, entries)
+        self.run_hook(t, session_id="sess-incr")
+        self.assertEqual(len(calls), 2)
+        self.assertIn("NEW TURN", calls[1])
+        self.assertNotIn("OLD TURN", calls[1])
+
+    def test_distill_input_capped_to_the_tail(self):
+        msgs = [user_msg(f"message number {i} " + "x" * 500) for i in range(60)]
+        t = transcript(self._tmp, msgs)
+        calls = self.fake_llm()
+        self.run_hook(t)
+        self.assertLessEqual(len(calls[0]), capture.MAX_USER_CHARS + len(capture.DISTILL_PROMPT) + 100)
+        self.assertIn("message number 59", calls[0])
+
+    def test_failed_distill_is_retried_on_the_next_capture(self):
+        t = transcript(self._tmp, [user_msg("z" * 300)])
+        llm.have_key = lambda: True
+        llm.generate = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("api down"))
+        self.run_hook(t, session_id="sess-retry")            # watermark must not advance
+        calls = self.fake_llm()
+        self.run_hook(t, session_id="sess-retry")
+        self.assertEqual(len(calls), 1)                      # same turns offered again
+
+    def test_nothing_durable_still_advances_watermark(self):
+        t = transcript(self._tmp, [user_msg("w" * 300)])
+        calls = self.fake_llm(distill_reply="NONE")
+        self.run_hook(t, session_id="sess-none")
+        self.run_hook(t, session_id="sess-none")
+        self.assertEqual(len(calls), 1)                      # not re-asked about the same turns
+
+    def test_watermarks_are_per_session(self):
+        t = transcript(self._tmp, [user_msg("q" * 300)])
+        calls = self.fake_llm()
+        self.run_hook(t, session_id="sess-a")
+        self.run_hook(t, session_id="sess-b")                # same transcript, other session
+        self.assertEqual(len(calls), 2)
+
+    def test_stale_sessions_pruned_from_state(self):
+        import time as _time
+        capture.STATE_PATH.write_text(json.dumps(
+            {"ancient": {"chars": 5, "ts": _time.time() - 90 * 86400}}))
+        t = transcript(self._tmp, [user_msg("p" * 300)])
+        self.fake_llm()
+        self.run_hook(t, session_id="sess-new")
+        state = json.loads(capture.STATE_PATH.read_text())
+        self.assertNotIn("ancient", state)
+        self.assertIn("sess-new", state)
 
 
 if __name__ == "__main__":

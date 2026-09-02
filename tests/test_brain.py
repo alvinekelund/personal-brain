@@ -341,6 +341,50 @@ class IngestTests(BrainTestCase):
             llm.generate = orig
         self.assertEqual(loops.inbox_list(self.vault_tmp), [])
 
+    def _ingest(self, reply):
+        """Run the full pipeline with a canned extraction reply (then '{}' for
+        entity linking and anything else)."""
+        responses = iter([reply])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            return extract.ingest(self.conn, "notes", source="claude-code session 5f2be1cf", user="Alvin")
+        finally:
+            llm.generate = orig
+
+    def test_ingest_never_readds_a_dropped_task(self):
+        """Regression (Sep 1 2026): three capture passes over the same session
+        re-extracted one action item into the inbox after every drop."""
+        import brain.loops as loops
+        reply = '{"nodes":[],"edges":[],"tasks":["Pursue MIT cross-registration for 6.7960 or 6.7900"]}'
+        self._ingest(reply)
+        self.assertEqual(len(loops.inbox_list(self.vault_tmp)), 1)
+        loops.inbox_drop(self.vault_tmp, 1)                      # Alvin: not a task (D-002)
+        self._ingest(reply)                                      # capture pass re-mines the turns
+        self.assertEqual(loops.inbox_list(self.vault_tmp), [])   # stays dropped
+
+    def test_ingest_commits_its_vault_writes(self):
+        """Regression (Sep 1 2026): every ingest left DIGEST.md, graph/ and the
+        inbox uncommitted, so `brain doctor` showed vault-git dirty until a
+        session mopped it up. Ingest now commits what it wrote — scoped, so a
+        curated file mid-edit is left alone."""
+        import subprocess
+        import brain.loops as brain_loops
+        for cmd in (["git", "init", "-q"], ["git", "config", "user.email", "t@test"],
+                    ["git", "config", "user.name", "t"]):
+            subprocess.run(cmd, cwd=self.vault_tmp, check=True, capture_output=True)
+        (self.vault_tmp / "areas.md").write_text("curated, mid-edit")
+        self._ingest('{"nodes":[{"name":"MIT","type":"organization","parent":"Education"}],'
+                     '"edges":[],"tasks":["email the registrar"]}')
+        r = subprocess.run(["git", "status", "--porcelain"], cwd=self.vault_tmp,
+                           capture_output=True, text=True)
+        self.assertEqual([l for l in r.stdout.splitlines() if l.strip()], ["?? areas.md"])
+        msg = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.vault_tmp,
+                             capture_output=True, text=True).stdout.strip()
+        self.assertEqual(msg, "ingest: refresh generated views (claude-code session 5f2be1cf)")
+        self.assertTrue((self.vault_tmp / "DIGEST.md").is_file())
+        self.assertEqual(len(brain_loops.inbox_list(self.vault_tmp)), 1)
+
     def test_divert_tasks_pure(self):
         ex = {"nodes": [{"name": "A", "type": "concept"}, {"name": "T", "type": "Task", "content": "do T"}],
               "edges": [{"source": "T", "target": "A"}, {"source": "A", "target": "A"}],

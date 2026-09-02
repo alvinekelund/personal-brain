@@ -28,7 +28,9 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
 
-**Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt.
+**Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt. Each session carries an ingest watermark (`capture-state.json`), so a long-lived session that ends repeatedly only ever mines the turns typed since its last capture — never the whole transcript again.
+
+**The vault stays committed** — every write the CLI or extractor makes to the vault commits itself: loop/decision edits commit as before, and an ingest commits its own generated output (`DIGEST.md`, `graph/`, `LOOPS-INBOX.md`) in a scoped commit that never sweeps up curated files you're mid-editing. `brain doctor`'s vault-git check can therefore stay strict: dirt means a human left something uncommitted, not that the extractor ran.
 
 ---
 
@@ -135,6 +137,8 @@ brain loop edit L-004 --due 2026-09-12 --owner waiting:protopapas --next "nudge 
 brain loop list [--all] [--area jobs]            # open loops by prio, then due
 brain loop lint                                  # grammar, duplicate ids, NOW.md drift; exit 1 on errors
 brain loop inbox [--drop N | --clear]            # action items the extractor found; triage with `loop add --from-inbox N`
+                                                 #   (drops/triages are remembered in .loops-inbox-seen.jsonl —
+                                                 #    a re-extraction of the same item is never re-added)
 brain decide "Fourth-seat plan of record" --what "..." --why "..." --rejected "..." --revisit "..."
 brain decisions [--last 5] [--lint]              # DECISIONS.md is append-only (git pre-commit enforced)
 brain today [--brief] [--date YYYY-MM-DD]        # action card: health line, countdowns, waits, Claude-owned loops, top 3

@@ -279,6 +279,95 @@ class InboxTests(LoopsTestCase):
         loops.inbox_add(self.root, ["email Heli"], today=TODAY)
         self.assertIn("INBOX: 1 untriaged action item(s)", loops.today_report(self.root, TODAY))
 
+    def test_dropped_item_is_never_readded(self):
+        """Regression: the same extracted sentence landed in the inbox three times
+        on Sep 1 2026, dropped each time. Once dropped, a re-extraction — however
+        it drifts in case, whitespace, or trailing punctuation — stays out."""
+        loops.inbox_add(self.root, ["Pursue MIT cross-registration for 6.7960 or 6.7900"], today=TODAY)
+        loops.inbox_drop(self.root, 1)
+        for variant in ["Pursue MIT cross-registration for 6.7960 or 6.7900",
+                        "pursue MIT  cross-registration for 6.7960 or 6.7900.",
+                        "PURSUE MIT CROSS-REGISTRATION FOR 6.7960 OR 6.7900!"]:
+            self.assertEqual(loops.inbox_add(self.root, [variant], today=TODAY), 0)
+        self.assertEqual(loops.inbox_list(self.root), [])
+        self.assertEqual(loops.inbox_add(self.root, ["a genuinely new task"], today=TODAY), 1)
+
+    def test_triaged_item_is_never_readded(self):
+        loops.inbox_add(self.root, ["email Protopapas about late arrival"], today=TODAY)
+        gone = loops.inbox_drop(self.root, 1, action="triaged")
+        self.assertEqual(gone["text"], "email Protopapas about late arrival")
+        self.assertEqual(loops.inbox_add(self.root, ["email Protopapas about late arrival"], today=TODAY), 0)
+
+    def test_clear_remembers_every_item(self):
+        loops.inbox_add(self.root, ["a", "b"], today=TODAY)
+        self.assertEqual(loops.inbox_clear(self.root), 2)
+        self.assertEqual(loops.inbox_add(self.root, ["a", "b", "c"], today=TODAY), 1)
+        self.assertEqual([i["text"] for i in loops.inbox_list(self.root)], ["c"])
+
+    def test_seen_ledger_is_auditable_and_tolerant(self):
+        loops.inbox_add(self.root, ["task one"], source="claude-code session abc123", today=TODAY)
+        loops.inbox_drop(self.root, 1)
+        line = loops.inbox_seen_path(self.root).read_text().strip()
+        rec = __import__("json").loads(line)
+        self.assertEqual(rec["text"], "task one")
+        self.assertEqual(rec["source"], "claude-code session abc123")
+        self.assertEqual(rec["action"], "dropped")
+        # a corrupt line never breaks matching
+        with open(loops.inbox_seen_path(self.root), "a") as f:
+            f.write("not json\n")
+        self.assertEqual(loops.inbox_add(self.root, ["task one"], today=TODAY), 0)
+
+
+class GitCommitTests(LoopsTestCase):
+    """Scoped commits: triage and machine writes commit themselves without
+    sweeping up unrelated dirt in the vault."""
+
+    def git_root(self):
+        import subprocess
+        for cmd in (["git", "init", "-q"], ["git", "config", "user.email", "t@test"],
+                    ["git", "config", "user.name", "t"]):
+            subprocess.run(cmd, cwd=self.root, check=True, capture_output=True)
+        return self.root
+
+    def porcelain(self):
+        import subprocess
+        r = subprocess.run(["git", "status", "--porcelain"], cwd=self.root,
+                           capture_output=True, text=True)
+        return [l for l in r.stdout.splitlines() if l.strip()]
+
+    def last_message(self):
+        import subprocess
+        return subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.root,
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_git_commit_paths_leaves_other_dirt_alone(self):
+        self.git_root()
+        (self.root / "DIGEST.md").write_text("digest")
+        (self.root / "areas.md").write_text("half-edited curated file")
+        self.assertTrue(loops.git_commit_paths(self.root, ["DIGEST.md", "graph"], "ingest: test"))
+        dirt = self.porcelain()
+        self.assertIn("?? areas.md", dirt)                     # bystander untouched
+        self.assertNotIn("DIGEST.md", " ".join(dirt))          # target committed
+        self.assertEqual(self.last_message(), "ingest: test")
+
+    def test_git_commit_paths_without_repo_or_changes(self):
+        self.assertFalse(loops.git_commit_paths(self.root, ["DIGEST.md"], "m"))   # no .git
+        self.git_root()
+        self.assertFalse(loops.git_commit_paths(self.root, ["DIGEST.md"], "m"))   # nothing exists
+        (self.root / "DIGEST.md").write_text("x")
+        self.assertTrue(loops.git_commit_paths(self.root, ["DIGEST.md"], "m"))
+        self.assertFalse(loops.git_commit_paths(self.root, ["DIGEST.md"], "m"))   # no changes
+
+    def test_inbox_drop_and_clear_commit_their_writes(self):
+        self.git_root()
+        loops.inbox_add(self.root, ["a", "b"], today=TODAY)
+        loops.inbox_drop(self.root, 1)
+        self.assertNotIn("?? LOOPS-INBOX.md", "".join(self.porcelain()))
+        self.assertNotIn(loops.INBOX_SEEN_FILE, "".join(self.porcelain()))
+        self.assertIn("loop inbox: dropped", self.last_message())
+        loops.inbox_clear(self.root)
+        self.assertIn("loop inbox: cleared 1 item(s)", self.last_message())
+
 
 if __name__ == "__main__":
     unittest.main()

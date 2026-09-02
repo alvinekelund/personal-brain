@@ -29,6 +29,8 @@ deterministic and date-free so NOW.md only changes when a loop changes;
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import subprocess
 from dataclasses import dataclass, field, replace
@@ -38,6 +40,7 @@ from pathlib import Path
 SEP = " · "
 LOOPS_FILE = "LOOPS.md"
 INBOX_FILE = "LOOPS-INBOX.md"
+INBOX_SEEN_FILE = ".loops-inbox-seen.jsonl"
 NOW_FILE = "NOW.md"
 START_MARK = "<!-- loops:start -->"
 END_MARK = "<!-- loops:end -->"
@@ -259,6 +262,27 @@ def git_commit(root: Path, message: str) -> bool:
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
                        capture_output=True, timeout=30)
         r = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", message],
+                           capture_output=True, timeout=30)
+        return r.returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def git_commit_paths(root: Path, paths: list[str], message: str) -> bool:
+    """Commit only these vault-relative paths (files or directories), leaving any
+    other dirt — a half-edited curated file, someone else's staged change — alone.
+    Used for writes that happen inside a larger operation (extractor ingest,
+    inbox triage) so machine-generated churn gets its own commit. Never raises."""
+    root = Path(root)
+    if not (root / ".git").exists():
+        return False
+    present = [p for p in paths if (root / p).exists()]  # a missing pathspec is fatal to git
+    if not present:
+        return False
+    try:
+        subprocess.run(["git", "-C", str(root), "add", "-A", "--"] + present,
+                       check=True, capture_output=True, timeout=30)
+        r = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", message, "--"] + present,
                            capture_output=True, timeout=30)
         return r.returncode == 0
     except (subprocess.SubprocessError, OSError):
@@ -498,13 +522,19 @@ INBOX_HEADER = """# LOOPS-INBOX — untriaged action items
 <!-- Written by the brain's extractor (brain add / brain_remember / session capture) whenever
      remembered text contains an open action item. These are NOT loops yet: triage each with
      `brain loop add "<title>" --due ... --next ... --from-inbox N` or discard with
-     `brain loop inbox --drop N`. The nightly sync empties this file. -->
+     `brain loop inbox --drop N`. The nightly sync empties this file.
+     Triage is remembered (.loops-inbox-seen.jsonl): a dropped or triaged item is never
+     re-added by the extractor, however many times a session re-states it. -->
 """
 INBOX_LINE_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2}) · (.+?)(?: · from: (.*))?$")
 
 
 def inbox_path(root: Path) -> Path:
     return Path(root) / INBOX_FILE
+
+
+def inbox_seen_path(root: Path) -> Path:
+    return Path(root) / INBOX_SEEN_FILE
 
 
 def inbox_list(root: Path) -> list[dict]:
@@ -527,39 +557,88 @@ def _inbox_write(root: Path, items: list[dict]):
     inbox_path(root).write_text(body, encoding="utf-8")
 
 
+def _inbox_key(text: str) -> str:
+    """Hash of the normalized task text, the identity used to suppress re-adds.
+    Case, whitespace, and trailing punctuation don't count as differences — the
+    extractor restates the same sentence with exactly that kind of drift."""
+    norm = " ".join(str(text).split()).replace("·", "-").lower().rstrip(".!?,;: ")
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def inbox_seen(root: Path) -> set[str]:
+    """Hashes of every task ever dropped or triaged out of the inbox."""
+    p = inbox_seen_path(root)
+    if not p.is_file():
+        return set()
+    seen = set()
+    for line in p.read_text(encoding="utf-8").splitlines():
+        try:
+            h = json.loads(line).get("hash")
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if h:
+            seen.add(h)
+    return seen
+
+
+def _inbox_seen_add(root: Path, items: list[dict], action: str, today: date | None = None):
+    """Append triage records to the seen ledger (JSONL, append-only, machine-written)."""
+    if not items:
+        return
+    today = today or date.today()
+    with open(inbox_seen_path(root), "a", encoding="utf-8") as f:
+        for i in items:
+            f.write(json.dumps({"hash": _inbox_key(i["text"]), "text": i["text"],
+                                "source": i.get("source", ""), "date": today.isoformat(),
+                                "action": action}, ensure_ascii=False) + "\n")
+
+
 def inbox_add(root: Path, texts: list[str], source: str = "", today: date | None = None) -> int:
-    """Append candidate tasks (deduped against what is already waiting). Returns how many were added."""
+    """Append candidate tasks, deduped against what is already waiting AND against
+    everything previously dropped or triaged (the seen ledger) — the extractor
+    re-mining a transcript must not resurface an item the user already dispatched.
+    Returns how many were added."""
     root = Path(root)
     if not root.is_dir():
         return 0
     today = today or date.today()
     items = inbox_list(root)
-    have = {i["text"].lower() for i in items}
+    have = {_inbox_key(i["text"]) for i in items} | inbox_seen(root)
     added = 0
     for t in texts:
         t = " ".join(str(t).split()).replace("·", "-").strip()
-        if not t or t.lower() in have:
+        if not t or _inbox_key(t) in have:
             continue
         items.append({"date": today.isoformat(), "text": t, "source": " ".join(source.split()).replace("·", "-")})
-        have.add(t.lower())
+        have.add(_inbox_key(t))
         added += 1
     if added:
         _inbox_write(root, items)
     return added
 
 
-def inbox_drop(root: Path, index: int) -> dict:
-    """Remove one entry by 1-based index; returns it. LoopError if out of range."""
+def inbox_drop(root: Path, index: int, action: str = "dropped", commit: bool = True) -> dict:
+    """Remove one entry by 1-based index and remember it in the seen ledger so the
+    extractor never re-adds it; returns it. `action` records why it left the inbox
+    ("dropped" | "triaged"). LoopError if out of range."""
     items = inbox_list(root)
     if not 1 <= index <= len(items):
         raise LoopError(f"inbox has {len(items)} item(s); no item {index}")
     gone = items.pop(index - 1)
+    _inbox_seen_add(root, [gone], action)
     _inbox_write(root, items)
+    if commit:
+        git_commit_paths(root, [INBOX_FILE, INBOX_SEEN_FILE],
+                         f"loop inbox: {action} — {gone['text'][:60]}")
     return gone
 
 
-def inbox_clear(root: Path) -> int:
-    n = len(inbox_list(root))
-    if n:
+def inbox_clear(root: Path, commit: bool = True) -> int:
+    items = inbox_list(root)
+    if items:
+        _inbox_seen_add(root, items, "dropped")
         _inbox_write(root, [])
-    return n
+        if commit:
+            git_commit_paths(root, [INBOX_FILE, INBOX_SEEN_FILE],
+                             f"loop inbox: cleared {len(items)} item(s)")
+    return len(items)
