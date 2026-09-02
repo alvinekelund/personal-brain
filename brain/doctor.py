@@ -55,7 +55,7 @@ def check_binary(expected: Path = EXPECTED_BIN) -> Check:
         note = "" if not running or running == expected.resolve() else f" (this run: {running})"
         return Check("binary", "ok", f"{expected}{note}")
     return Check("binary", "fail", f"{expected} missing — reinstall: "
-                 f"python3.12 -m venv {DATA_DIR}/venv && {DATA_DIR}/venv/bin/pip install -e ~/CV-Projects/personal-brain")
+                 f"python3.12 -m venv {DATA_DIR}/venv && {DATA_DIR}/venv/bin/pip install -e ~/Projects/brain/personal-brain")
 
 
 def check_db(db_path: Path = DB_PATH, now: float | None = None) -> Check:
