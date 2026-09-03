@@ -150,6 +150,28 @@ def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None =
     return Check("capture", "ok", f"last run {age_h:.0f}h ago: {tail}" if age_h is not None else tail)
 
 
+def check_index(db_path: Path = DB_PATH, root: Path | None = None) -> Check:
+    """Is the vault index current? (D-014: the directory is the brain; the graph
+    routes questions to its files, so a stale index sends `brain ask` to old text.)"""
+    from brain import config, index as vindex
+    root = Path(root) if root is not None else config.vault_dir()
+    if not Path(db_path).is_file() or not root.is_dir():
+        return Check("vault-index", "warn", "no graph or vault to index yet")
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        s = vindex.status(conn, root)
+        conn.close()
+    except sqlite3.Error as e:
+        return Check("vault-index", "fail", f"cannot read the index: {e}")
+    if not s["indexed"]:
+        return Check("vault-index", "warn", f"{s['on_disk']} vault file(s), none indexed — run `brain index`")
+    changed = len(s["new"]) + len(s["stale"]) + len(s["removed"])
+    if changed:
+        return Check("vault-index", "warn", f"{changed} vault file(s) changed since the last index — run `brain index`")
+    return Check("vault-index", "ok", f"{s['indexed']} files · {s['node_links']} node links · {s['embedded']} embedded")
+
+
 def check_key() -> Check:
     return (Check("gemini-key", "ok", "present") if llm.have_key()
             else Check("gemini-key", "warn", "no GEMINI_API_KEY — brain add / capture / ask are disabled"))
@@ -291,6 +313,7 @@ def run(root: Path, today: date | None = None, now: float | None = None,
     if capture_log is not None:
         checks.append(check_capture(capture_log, now))
     checks += check_vault(root, today, now)
+    checks.append(check_index(db_path, root))
     checks += check_wiring(settings, claude_json, tasks_dir)
     return checks
 

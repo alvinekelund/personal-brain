@@ -26,7 +26,7 @@ INSTRUCTIONS = (
     "a to-do list: any open action item in remembered text is routed to the "
     "vault's LOOPS-INBOX.md for triage (`brain loop inbox`), and brain_digest "
     "lists open loops from LOOPS.md. Call brain_ask or brain_search to recall "
-    "specifics. Reading a memory reinforces it; unaccessed memories fade on a "
+    "specifics; both return vault file paths — the files are the source of truth, read them. Reading a memory reinforces it; unaccessed memories fade on a "
     "forgetting curve."
 )
 
@@ -59,9 +59,11 @@ TOOLS = [
     {
         "name": "brain_search",
         "description": (
-            "Search the user's knowledge graph. Ranks by meaning (embeddings) when "
+            "Search the user's brain: the vault files (the source of truth) and the "
+            "knowledge graph that indexes them. Ranks by meaning (embeddings) when "
             "available, falling back to stem-aware keyword match. Returns matching "
-            "nodes with type, name, weight, and content. Accessing a node "
+            "nodes (with the vault file each points to) and the matching files by "
+            "path — read the files for the full picture. Accessing a node "
             "reinforces it against forgetting."
         ),
         "inputSchema": {
@@ -80,8 +82,9 @@ TOOLS = [
         "name": "brain_ask",
         "description": (
             "Ask a natural-language question about the user; answered strictly "
-            "from their knowledge graph, with the source nodes listed. Use for "
-            "recall ('where does Alvin want to study?'), not for saving."
+            "from their vault files (routed via the graph index) plus ledgers and "
+            "graph nodes, with the file paths and source ids listed — open the "
+            "files when you need more than the answer. Use for recall, not for saving."
         ),
         "inputSchema": {
             "type": "object",
@@ -128,7 +131,13 @@ TOOLS = [
 
 def _fmt_node(n) -> str:
     content = (n["content"] or "").strip()
-    return f"[{n['type']}] {n['name']} (weight {n['weight']:.2f}): {content}"
+    path = n["path"] if "path" in n.keys() and n["path"] else ""
+    return f"[{n['type']}] {n['name']} (weight {n['weight']:.2f}): {content}" + (f"  → {path}" if path else "")
+
+
+def _fmt_files(files: list) -> str:
+    return "files (the vault is the source of truth — read these):\n" + "\n".join(
+        f"  {f['path']} — {f['title']} ({', '.join(f['why'])})" for f in files)
 
 
 def _remember(conn, args):
@@ -172,9 +181,14 @@ def _search(conn, args):
             db.touch_node(conn, r["id"])
         conn.commit()
 
-    if not results:
+    from brain import index
+    files = index.search(conn, query, k=min(limit, 6), seed_node_ids=[r["id"] for r in results])
+    if not results and not files:
         return f"No memories match '{query}'."
-    return "\n".join(_fmt_node(r) for r in results)
+    out = "\n".join(_fmt_node(r) for r in results)
+    if files:
+        out = (out + "\n\n" if out else "") + _fmt_files(files)
+    return out
 
 
 def _ask(conn, args):
@@ -183,8 +197,10 @@ def _ask(conn, args):
         raise ValueError("'question' is required and must be non-empty.")
     res = graph.answer_question(conn, question)
     out = res["answer"]
+    if res.get("files"):
+        out += "\n\nfiles: " + ", ".join(res["files"])
     if res["sources"]:
-        out += "\n\nsources: " + ", ".join(res["sources"])
+        out += "\nsources: " + ", ".join(res["sources"])
     return out
 
 

@@ -249,18 +249,20 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
     """
     history = history or []
     retrieval_q = (history[-1].get("q", "") + " " + question).strip() if history else question
-    seeds = []
+    seeds, qvec = [], None
     try:
         if llm.have_key():
-            seeds = [r for _, r in semantic_search(conn, llm.embed(retrieval_q),
-                                                   min_weight=min_weight, limit=k)]
+            qvec = llm.embed(retrieval_q)
+            seeds = [r for _, r in semantic_search(conn, qvec, min_weight=min_weight, limit=k)]
     except Exception:
-        seeds = []
+        seeds, qvec = [], None
     if not seeds:
         seeds = db.search_nodes(conn, retrieval_q, min_weight=min_weight)[:k]
     ledger_lines, ledger_sources = ledger_context(retrieval_q, ledger_root)
-    if not seeds and not ledger_lines:
-        return {"answer": "I don't have anything on that yet.", "sources": []}
+    # D-014: the vault directory is the source of truth — route the question to its files
+    files, file_lines = file_context(conn, retrieval_q, seeds, ledger_root, query_vector=qvec)
+    if not seeds and not ledger_lines and not files:
+        return {"answer": "I don't have anything on that yet.", "sources": [], "files": []}
 
     # pull in 1-hop neighbors of the matches for connected context (capped)
     seed_ids = {n["id"] for n in seeds}
@@ -275,26 +277,51 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
         if len(neighbors) >= 12:
             break
 
-    lines = [f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in seeds]
-    if ledger_lines:
-        lines = ledger_lines + ["Graph:"] + lines if lines else ledger_lines
+    graph_lines = [f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in seeds]
     if neighbors:
-        lines.append("Related:")
-        lines += [f"- {o['name']} ({o['type']}): {o['content'] or ''}"
-                  for o in list(neighbors.values())[:12]]
+        graph_lines.append("Related:")
+        graph_lines += [f"- {o['name']} ({o['type']}): {o['content'] or ''}"
+                        for o in list(neighbors.values())[:12]]
+    lines = list(ledger_lines)
+    if file_lines:
+        lines += ["Files (the vault is the source of truth; cite a file by its path):"] + file_lines
+    if graph_lines:
+        lines += ["Graph:"] + graph_lines
     convo = ""
     if history:
         convo = "Conversation so far:\n" + "\n".join(
             f"Q: {h.get('q', '')}\nA: {h.get('a', '')}" for h in history[-3:]) + "\n\n"
     prompt = (
         "Answer the question using ONLY the following knowledge about the person. "
-        "If the answer isn't contained in it, say you don't have that. Be concise and direct.\n\n"
+        "If the answer isn't contained in it, say you don't have that. Be concise and direct. "
+        "When a fact comes from a file, mention the file path.\n\n"
         f"{convo}Knowledge:\n{chr(10).join(lines)}\n\nQuestion: {question}"
     )
     for n in seeds:  # asking accesses these memories → reinforce them
         db.touch_node(conn, n["id"])
     conn.commit()
-    return {"answer": llm.generate(prompt).strip(), "sources": ledger_sources + [n["name"] for n in seeds]}
+    return {"answer": llm.generate(prompt).strip(),
+            "sources": ledger_sources + [f["path"] for f in files] + [n["name"] for n in seeds],
+            "files": [f["path"] for f in files]}
+
+
+def file_context(conn, query: str, seeds: list, root=None, query_vector=None, n: int = 4):
+    """The vault files a question should be answered from (D-014), as
+    (ranked file dicts, prompt lines with excerpts read from disk). Files linked
+    to the retrieved graph nodes rank higher; a missing index yields nothing."""
+    from brain import config, index
+    root = Path(root) if root is not None else config.vault_dir()
+    try:
+        files = index.search(conn, query, k=n, seed_node_ids=[s["id"] for s in seeds],
+                             query_vector=query_vector)
+    except Exception:
+        return [], []
+    lines = []
+    for f in files:
+        ex = index.excerpt(root, f["path"], query)
+        if ex:
+            lines += [f"### {f['path']} ({f['title']})", ex]
+    return files, lines
 
 
 def ledger_context(query: str, root=None) -> tuple[list[str], list[str]]:

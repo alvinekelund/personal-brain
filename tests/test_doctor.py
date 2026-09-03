@@ -84,6 +84,24 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
         self.assertTrue(doctor.brief(list(checks.values())).startswith("brain ⚠"))
 
+    def test_vault_index_check(self):
+        import brain.index as index
+        (self.root / "profile").mkdir()
+        (self.root / "profile" / "background.md").write_text("---\ntype: profile\nname: Background\n---\n# Background\n")
+        checks = by_name(self.run_doctor())
+        self.assertEqual(checks["vault-index"].status, "warn")
+        self.assertIn("none indexed", checks["vault-index"].detail)
+        conn = db.connect()
+        index.build(conn, self.root, embed=False)
+        conn.close()
+        checks = by_name(self.run_doctor())
+        self.assertEqual(checks["vault-index"].status, "ok", checks["vault-index"].detail)
+        (self.root / "profile" / "background.md").write_text("---\ntype: profile\nname: Background\n---\n# Background\n- moved to Boston\n")
+        os.utime(self.root / "profile" / "background.md", (time.time() + 5, time.time() + 5))
+        checks = by_name(self.run_doctor())
+        self.assertEqual(checks["vault-index"].status, "warn")
+        self.assertIn("changed since the last index", checks["vault-index"].detail)
+
     def test_missing_binary_is_loud_everywhere(self):
         self.bin.unlink()
         checks = by_name(self.run_doctor())

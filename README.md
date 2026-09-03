@@ -34,6 +34,8 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Ledger-aware answers** — `brain ask` / `brain_ask` put matching decisions (with their revisit triggers) and loops in front of the graph nodes, and cite their ids as sources, so "what did I decide about X" is answered from the ledger rather than from whatever the graph happened to extract.
 
+**The vault is the brain; the graph is its index (D-014)** — `brain index` walks the vault directory (`profile/`, `courses/`, `applications/`, `orgs/`, `projects/`, `people/`, `apps/`, `topics/`, `docs/`, `areas/`, `log/`, with `ALVIN.md` as the hub), records every file's path, kind, title, aliases, search tokens, content hash and (with a key) embedding, links files to each other by the paths they mention and to graph nodes whose name matches a title or alias, and stamps each such node with its `path`. Incremental by content hash; generated views and the CLI-owned ledgers are skipped. `brain ask` / `brain_ask` then route a question to files first — keyword, graph-hop and embedding signals — read the top files from disk, and answer with the paths cited; `brain query` / `brain_search` list the matching files under the nodes. `brain doctor` warns when the index is stale. The index never holds a fact of its own: change a file, run `brain index`, and every answer follows.
+
 **Agent memory (MCP)** — `brain mcp` runs an MCP server over stdio (pure stdlib, no SDK). Any MCP client gets five tools — `brain_remember`, `brain_search`, `brain_ask`, `brain_context`, `brain_digest` — so an agent can load who you are at session start, recall specifics mid-task, and deposit new knowledge back into the graph as you work. Memories an agent reads are reinforced; ones nothing touches fade. Where built-in assistant memory is a flat list of disconnected facts, this is a typed graph with forgetting.
 
 **Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt. Each session carries an ingest watermark (`capture-state.json`), so a long-lived session that ends repeatedly only ever mines the turns typed since its last capture — never the whole transcript again.
@@ -112,7 +114,8 @@ brain show --type concept        # filter by type
 brain query "attention"               # keyword / stem search
 brain reindex                         # embed all nodes (needed once for semantic)
 brain query "machine learning" --semantic   # rank by meaning, not keywords
-brain ask "where do I want to study?"        # Q&A — answers from your brain, with sources
+brain index [--no-embed] [--status]   # index the vault directory: file paths, aliases, links, node paths (D-014)
+brain ask "where do I want to study?"        # Q&A — files first (paths cited), then ledgers and graph nodes
 
 # Context document (pipe into Claude, ChatGPT, etc.)
 brain context "machine learning"

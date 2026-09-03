@@ -130,6 +130,33 @@ CREATE TABLE IF NOT EXISTS ingestion_log (
     edges_added  TEXT
 );
 
+-- the vault index (brain/index.py): the directory is the brain, these tables route to its files
+CREATE TABLE IF NOT EXISTS vault_files (
+    path        TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    aliases     TEXT NOT NULL DEFAULT '[]',
+    summary     TEXT NOT NULL DEFAULT '',
+    tokens      TEXT NOT NULL DEFAULT '',
+    updated     TEXT NOT NULL DEFAULT '',
+    mtime       REAL NOT NULL,
+    size        INTEGER NOT NULL,
+    sha         TEXT NOT NULL,
+    embedding   TEXT,
+    indexed_at  REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS vault_file_links (
+    path    TEXT NOT NULL,
+    target  TEXT NOT NULL,
+    PRIMARY KEY (path, target)
+);
+CREATE TABLE IF NOT EXISTS vault_file_nodes (
+    path     TEXT NOT NULL,
+    node_id  TEXT NOT NULL,
+    how      TEXT NOT NULL,
+    PRIMARY KEY (path, node_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_nodes_name    ON nodes(name);
 CREATE INDEX IF NOT EXISTS idx_nodes_type    ON nodes(type);
 CREATE INDEX IF NOT EXISTS idx_nodes_weight  ON nodes(weight);
@@ -164,6 +191,9 @@ def _migrate(conn):
         conn.execute("ALTER TABLE nodes ADD COLUMN embedding TEXT")
     if "importance" not in node_cols:
         conn.execute("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
+    # path: the vault file that is this node's source of truth (stamped by `brain index`, D-014)
+    if "path" not in node_cols:
+        conn.execute("ALTER TABLE nodes ADD COLUMN path TEXT")
     # last_decayed (nodes + edges): the moment the stored weight was last brought
     # up to date. Decay is time-based from here, so running the CLI ten times a day
     # no longer compounds ten decays (the bug that dismantled the hierarchy in

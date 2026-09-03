@@ -269,5 +269,46 @@ class ToolCallTests(MCPTestCase):
         conn.close()
 
 
+class VaultIndexTests(MCPTestCase):
+    """brain_search and brain_ask hand back vault file paths (D-014)."""
+
+    def _vault(self):
+        root = Path(config.load()["vault_dir"])
+        (root / "people").mkdir(exist_ok=True)
+        (root / "people" / "heli.md").write_text(
+            "---\nperson: heli\nname: Heli Helskyaho\nrole: Alvin's boss\naliases: [Heli]\n---\n"
+            "# Heli Helskyaho\n- Group CEO of Miracle Consulting Group.\n", encoding="utf-8")
+        return root
+
+    def test_search_lists_matching_files_and_node_paths(self):
+        import brain.index as index
+        root = self._vault()
+        conn = db.connect()
+        heli = db.add_node(conn, "Heli", type_="person", content="Alvin's boss.")
+        conn.commit()
+        index.build(conn, root, embed=False)
+        conn.close()
+        text = tool_text(call_tool("brain_search", {"query": "Heli"}))
+        self.assertIn("[person] Heli", text)
+        self.assertIn("→ people/heli.md", text)                 # the node points at its file
+        self.assertIn("files (the vault is the source of truth", text)
+        self.assertIn("people/heli.md — Heli Helskyaho", text)
+
+    def test_ask_lists_files(self):
+        import brain.index as index
+        root = self._vault()
+        conn = db.connect()
+        index.build(conn, root, embed=False)
+        conn.close()
+        llm.generate = lambda *a, **k: "Group CEO of Miracle."
+        try:
+            text = tool_text(call_tool("brain_ask", {"question": "who is Heli?"}))
+        finally:
+            llm.generate = self._orig_generate
+        self.assertIn("Group CEO of Miracle.", text)
+        self.assertIn("files: people/heli.md", text)
+        self.assertIn("sources: people/heli.md", text)
+
+
 if __name__ == "__main__":
     unittest.main()

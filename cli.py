@@ -156,13 +156,21 @@ def query(query, min_weight, limit, semantic):
         return
 
     results = graph.query_nodes(conn, query, min_weight=min_weight)[:limit]
-    if not results:
-        click.echo("No results.")
-        return
     for r in results:
+        path = r["path"] if "path" in r.keys() and r["path"] else ""
         click.echo(
             f"[{r['type']:8s}] {r['name']:30s}  w={r['weight']:.2f}  {r['content'][:60]}"
+            + (f"  → {path}" if path else "")
         )
+    from brain import index as vindex
+    files = vindex.search(conn, query, k=6, seed_node_ids=[r["id"] for r in results])
+    if not results and not files:
+        click.echo("No results.")
+        return
+    if files:
+        click.echo("\nfiles (the vault is the source of truth):")
+        for f in files:
+            click.echo(f"  {f['path']:42s} {f['title'][:38]:38s} {', '.join(f['why'])}")
 
 
 # ── ask ───────────────────────────────────────────────────────────────────────
@@ -175,8 +183,10 @@ def ask(question):
     _run_decay(conn)
     res = graph.answer_question(conn, question)
     click.echo(res["answer"])
+    if res.get("files"):
+        click.echo("\nfiles: " + ", ".join(res["files"]))
     if res["sources"]:
-        click.echo("\nsources: " + ", ".join(res["sources"]))
+        click.echo("sources: " + ", ".join(res["sources"]))
 
 
 # ── context ───────────────────────────────────────────────────────────────────
@@ -401,6 +411,35 @@ def clear(yes):
 
 
 # ── reindex ───────────────────────────────────────────────────────────────────
+
+@cli.command("index")
+@click.option("--no-embed", is_flag=True, help="Skip embeddings (keyword + graph links only).")
+@click.option("--status", "show_status", is_flag=True, help="Report how current the index is; change nothing.")
+def index_cmd(no_embed, show_status):
+    """Index the vault directory so `brain ask` / brain_search route to the right files (D-014).
+
+    Incremental: unchanged files (by content hash) are skipped; deleted files drop out;
+    graph nodes whose name matches a file's title or alias get their `path` stamped.
+    """
+    from brain import index as vindex
+    conn = db.connect()
+    root = vault.vault_dir()
+    if show_status:
+        s = vindex.status(conn, root)
+        changed = len(s["new"]) + len(s["stale"]) + len(s["removed"])
+        click.echo(f"{s['indexed']} indexed / {s['on_disk']} on disk · {s['node_links']} node link(s) · "
+                   f"{s['embedded']} embedded · {changed} changed since last index")
+        for label, items in (("new", s["new"]), ("changed", s["stale"]), ("removed", s["removed"])):
+            for p in items[:20]:
+                click.echo(f"  {label}: {p}")
+        return
+    s = vindex.build(conn, root, embed=not no_embed)
+    click.echo(f"Indexed {s['files']} vault file(s): {s['added']} added, {s['updated']} updated, "
+               f"{s['removed']} removed, {s['unchanged']} unchanged · {s['links']} file link(s), "
+               f"{s['node_links']} node link(s), {s['embedded']} embedded")
+    if s["no_frontmatter"]:
+        click.echo("  no front-matter: " + ", ".join(s["no_frontmatter"][:10]))
+
 
 @cli.command()
 def reindex():
