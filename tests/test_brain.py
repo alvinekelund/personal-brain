@@ -44,6 +44,10 @@ class BrainTestCase(unittest.TestCase):
         self._orig_have_key = llm.have_key
         self._orig_generate = llm.generate
         llm.have_key = lambda: False
+        # no test may reach the network: an un-mocked generate/embed fails fast instead of hanging
+        self._orig_embed = llm.embed
+        llm.generate = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("llm.generate is disabled in tests; mock it"))
+        llm.embed = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("llm.embed is disabled in tests; mock it"))
         # the vault (LOOPS.md, LOOPS-INBOX.md) is resolved through config — point it at
         # a temp dir so digest/ingest never read or write the real one
         self._orig_config_path = config.CONFIG_PATH
@@ -56,7 +60,7 @@ class BrainTestCase(unittest.TestCase):
         self.conn.close()
         db.DB_PATH = self._orig_db_path
         llm.have_key = self._orig_have_key
-        llm.generate = self._orig_generate
+        llm.generate, llm.embed = self._orig_generate, self._orig_embed
         config.CONFIG_PATH = self._orig_config_path
 
     def _age(self, node_id, days):
@@ -330,10 +334,7 @@ class IngestTests(BrainTestCase):
         self.conn.commit()
         seen = {}
         llm.generate = lambda prompt, *a, **k: seen.setdefault("prompt", prompt) and "9.522, per D-001."
-        try:
-            res = graph.answer_question(self.conn, "what did I decide about the fourth seat 9.522?")
-        finally:
-            llm.generate = self._orig_generate if hasattr(self, "_orig_generate") else llm.generate
+        res = graph.answer_question(self.conn, "what did I decide about the fourth seat 9.522?")
         self.assertIn("D-001 (2026-09-01) Fourth-seat plan of record", seen["prompt"])
         self.assertIn("Revisit if: Protopapas", seen["prompt"])
         self.assertIn("L-001 Lock the fourth fall course seat (due 2026-09-09, owner alvin)", seen["prompt"])

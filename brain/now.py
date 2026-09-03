@@ -12,7 +12,7 @@ have exactly one writer:
     IDENTITY.md        one curated paragraph: who Alvin is right now
     LOOPS.md           open loops (title/due/owner only here — actions live in `brain today`)
     areas/<area>.md    front-matter `area:` `updated:` `aliases:` + a `## Now` block (≤4 lines)
-    people/<name>.md   front-matter `name:` `role:` `updated:`
+    people/<name>.md   front-matter `name:` `role:` `updated:` (`now: false` = index-only, not shown)
     apps/<app>.md      front-matter `name:` `purpose:` `url:` `type:` `updated:`
 
 Rendering is deterministic (dates come from front-matter, never from the clock),
@@ -214,8 +214,9 @@ def render_text(root: Path) -> str:
         out += block[:MAX_NOW_LINES] if block else [f"- (no `## Now` block in areas/{s.path.name})"]
     out.append("")
 
-    # people
-    people = _load_dir(root, "people")
+    # people (front-matter `now: false` keeps index-only people out of this line)
+    people = [s for s in _load_dir(root, "people")
+              if str(s.fm.get("now", "")).strip().lower() not in ("false", "no", "0")]
     if people:
         waits = {}
         for l in waiting:

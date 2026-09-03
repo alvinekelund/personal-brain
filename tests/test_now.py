@@ -76,6 +76,16 @@ class RenderTests(NowTestCase):
         self.assertTrue(text.rstrip().endswith("`brain doctor`."))
         self.assertNotIn(TODAY.isoformat(), text)                       # deterministic: no clock
 
+    def test_index_only_people_stay_out_of_now(self):
+        """`now: false` keeps a person retrievable in people/ without lengthening NOW.md."""
+        w(self.root / "people/kosuke-imai.md",
+          "---\nperson: kosuke-imai\nname: Kosuke Imai\nrole: teaches STAT 286\nnow: false\n---\n# Kosuke\n")
+        text = now.render_text(self.root)
+        self.assertNotIn("Kosuke Imai", text)
+        self.assertIn("**Anna Houstecka** — Alvin's girlfriend", text)
+        errors, _ = now.lint(self.root, TODAY)
+        self.assertFalse([e for e in errors if "kosuke" in e])
+
     def test_write_is_idempotent_and_loop_ops_rerender(self):
         self.assertTrue(now.write(self.root))
         self.assertFalse(now.write(self.root))
