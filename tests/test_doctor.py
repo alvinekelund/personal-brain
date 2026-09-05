@@ -154,6 +154,12 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(doctor._paths_in("reinstall: ~/x/brain and /y/python3 and /z/other"),
                          [str(Path("~/x/brain").expanduser()), "/y/python3"])
 
+    def test_relative_vault_paths_are_not_read_as_absolute(self):
+        (self.tasks / "nightly" / "SKILL.md").write_text(
+            "edit areas/brain.md and docs/reviews/2026-W36.md, then run brain index\n")
+        self.assertEqual(by_name(self.run_doctor())["scheduled-tasks"].status, "ok")
+        self.assertEqual(doctor._paths_in("areas/brain.md · log/brain.md"), [])
+
     def test_api_probe_tls_failure_is_a_failure_with_fix(self):
         import ssl
         def bad_tls():

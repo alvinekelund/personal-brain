@@ -31,7 +31,9 @@ EXPECTED_BIN = DATA_DIR / "venv" / "bin" / "brain"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 CLAUDE_JSON = Path.home() / ".claude.json"
 SCHEDULED_TASKS = Path.home() / ".claude" / "scheduled-tasks"
-ABS_PATH_RE = re.compile(r"(~?/[\w./+-]+)")
+# Only count a path as absolute when nothing word-like precedes it, so a relative
+# mention such as "areas/brain.md" is not read as the path "/brain.md".
+ABS_PATH_RE = re.compile(r"(?<![\w.~-])(~?/[\w./+-]+)")
 
 
 @dataclass
