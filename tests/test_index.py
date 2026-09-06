@@ -182,6 +182,20 @@ class BuildTests(IndexTestCase):
         index.build(self.conn, self.root, embed=False)
         self.assertIsNone(db.get_node(self.conn, heli)["path"])
 
+    def test_school_prefixed_node_links_to_the_course_file(self):
+        """The graph names courses "MIT 9.522" / "Harvard STAT 211" while a
+        course file's alias is the bare code — five real nodes were unlinked
+        that way on Sep 6 2026."""
+        w(self.root / "courses/mit-9-522.md",
+          "---\ntype: course\nname: MIT 9.522 Statistical Reinforcement Learning (Rakhlin)\ncode: 9.522\n"
+          "aliases: [9.522, Statistical RL]\nupdated: 2026-09-04\n---\n# 9.522\n- Petition approved Sep 2.\n")
+        node = db.add_node(self.conn, "MIT 9.522", type_="concept", content="Fourth-seat candidate.")
+        stat = db.add_node(self.conn, "Harvard STAT 211", type_="concept")
+        self.conn.commit()
+        index.build(self.conn, self.root, embed=False)
+        self.assertEqual(db.get_node(self.conn, node)["path"], "courses/mit-9-522.md")
+        self.assertEqual(db.get_node(self.conn, stat)["path"], "courses/stat-211.md")
+
     def test_status_reports_new_stale_and_removed(self):
         s = index.status(self.conn, self.root)
         self.assertEqual(s["indexed"], 0)
@@ -231,6 +245,20 @@ class SearchTests(IndexTestCase):
         by_path = {h["path"]: h for h in hits}
         self.assertIn("people/heli.md", by_path)
         self.assertIn("linked from ALVIN.md", by_path["people/heli.md"]["why"])
+
+    def test_who_questions_surface_people_files(self):
+        """"Who is Alvin's boss at Miracle?" must reach people/heli.md although
+        the org file out-scores it on plain keyword hits (a real under-answer:
+        "people met at Harvard" returned org and profile files only)."""
+        w(self.root / "orgs/miracle.md",
+          "---\ntype: org\nname: Miracle Consulting Group\naliases: [Miracle]\nupdated: 2026-09-04\n---\n"
+          "# Miracle\n- Consulting group in Finland; Alvin's employer; contracts, Siemens.\n")
+        index.build(self.conn, self.root, embed=False)
+        plain = index.search(self.conn, "Miracle contracts")
+        self.assertEqual(plain[0]["path"], "orgs/miracle.md")             # no boost without a who-question
+        who = index.search(self.conn, "who is Alvin's boss at Miracle?")
+        self.assertEqual(who[0]["path"], "people/heli.md")
+        self.assertIn("who-question: person file", who[0]["why"])
 
     def test_semantic_ranking_with_fake_embeddings(self):
         """No keyword overlap between 'ironman' and the athlete file — the (fake,

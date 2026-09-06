@@ -409,6 +409,40 @@ class IngestTests(BrainTestCase):
         self.assertEqual(types["Fall 2026"], "event")                # a season, not a course
         self.assertEqual(types["AY1653"], "event")                   # a flight, not a course
 
+    def test_who_questions_seed_person_nodes_first(self):
+        """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
+        "Harvard ..." on the real brain, so no people reached the answer. On a
+        who-question, person nodes seed first (keyword path here; the semantic
+        path applies the same preference)."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        for name, type_ in (("Harvard", "organization"), ("Harvard account", "artifact"),
+                            ("Harvard Federal Credit Union", "organization"),
+                            ("Liam Shepard", "person"), ("Shivam Singhal", "person")):
+            db.add_node(self.conn, name, type_=type_, content=f"{name}: met through Harvard.")
+        self.conn.commit()
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "ans")[1]
+        try:
+            graph.answer_question(self.conn, "Who did Alvin meet at Harvard?", k=3, ledger_root=self.vault_tmp)
+            graph.answer_question(self.conn, "What is the Harvard account?", k=3, ledger_root=self.vault_tmp)
+            plain = captured["p"]
+        finally:
+            llm.generate = orig
+        # (the who-question prompt was captured first; the plain one overwrote it — re-run for clarity)
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "ans")[1]
+        try:
+            graph.answer_question(self.conn, "Who did Alvin meet at Harvard?", k=3, ledger_root=self.vault_tmp)
+        finally:
+            llm.generate = orig
+        who = captured["p"]
+        graph_part = who.split("Graph:", 1)[1]
+        first_two = graph_part.strip().splitlines()[:2]
+        self.assertTrue(all("(person)" in line for line in first_two), first_two)
+        self.assertIn("Liam Shepard", graph_part)
+        self.assertIn("Shivam Singhal", graph_part)
+        self.assertIn("Harvard account (artifact)", plain)              # no preference without a who-question
+
 
     def test_merge_reroots_detached_categories(self):
         """A category that lost its part_of edge to the person (decay, a bad

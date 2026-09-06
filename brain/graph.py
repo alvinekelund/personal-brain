@@ -247,17 +247,31 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
     history (optional [{q, a}, ...]) makes it conversational — the prior turn is
     folded into retrieval and the prompt so follow-ups ("...and where?") resolve.
     """
+    from brain import index as _index
     history = history or []
     retrieval_q = (history[-1].get("q", "") + " " + question).strip() if history else question
+    who = bool(_index._WHO_RE.search(retrieval_q.lower()))
+
+    def prefer_people(rows):
+        # a who-question is answered from people: person nodes seed first, so
+        # their files get the seed bonus and they appear in the graph context
+        if not who:
+            return rows[:k]
+        people = [r for r in rows if r["type"] == "person"]
+        others = [r for r in rows if r["type"] != "person"]
+        return (people[:k] + others)[:k]
+
     seeds, qvec = [], None
     try:
         if llm.have_key():
             qvec = llm.embed(retrieval_q)
-            seeds = [r for _, r in semantic_search(conn, qvec, min_weight=min_weight, limit=k)]
+            pool = [r for _, r in semantic_search(conn, qvec, min_weight=min_weight,
+                                                  limit=k * 4 if who else k)]
+            seeds = prefer_people(pool)
     except Exception:
         seeds, qvec = [], None
     if not seeds:
-        seeds = db.search_nodes(conn, retrieval_q, min_weight=min_weight)[:k]
+        seeds = prefer_people(db.search_nodes(conn, retrieval_q, min_weight=min_weight)[:k * 4 if who else k])
     ledger_lines, ledger_sources = ledger_context(retrieval_q, ledger_root)
     # D-014: the vault directory is the source of truth — route the question to its files
     files, file_lines = file_context(conn, retrieval_q, seeds, ledger_root, query_vector=qvec)
@@ -305,7 +319,7 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
             "files": [f["path"] for f in files]}
 
 
-def file_context(conn, query: str, seeds: list, root=None, query_vector=None, n: int = 4):
+def file_context(conn, query: str, seeds: list, root=None, query_vector=None, n: int = 6):
     """The vault files a question should be answered from (D-014), as
     (ranked file dicts, prompt lines with excerpts read from disk). Files linked
     to the retrieved graph nodes rank higher; a missing index yields nothing."""

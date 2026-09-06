@@ -164,11 +164,33 @@ def parse_file(root: Path, path: Path) -> dict:
 
 # ── building the index ────────────────────────────────────────────────────────
 
+_SCHOOL_PREFIX = re.compile(r"^(?:mit|harvard|aalto|stanford)\s+")
+# a who-question wants people: boost person files that match at all, and keep
+# a few of them in the result even when bigger files out-score them
+_WHO_RE = re.compile(r"\b(?:who|whom|whose|people|persons?|friends?|colleagues?|classmates?|contacts?)\b")
+WHO_SLOTS = 3
+# question filler that would otherwise count as body hits in every large file
+_QUERY_STOP = {
+    "who", "whom", "whose", "what", "which", "when", "where", "why", "how", "does", "do", "did",
+    "has", "have", "had", "been", "was", "were", "will", "would", "can", "could", "should", "shall",
+    "there", "their", "they", "them", "he", "she", "his", "her", "him", "we", "our", "you", "your",
+    "at", "as", "by", "from", "into", "than", "then", "up", "out", "all", "any", "some", "so", "far",
+    "too", "very", "just", "also", "now", "still", "yet", "ever", "never", "each", "every", "much",
+    "many", "more", "most", "such", "not", "no", "only", "same", "other", "own", "here",
+}
+
+
 def _node_name_map(conn) -> dict[str, list]:
-    """normalized node name → [node rows] (active nodes only)."""
+    """normalized node name → [node rows] (active nodes only). A node named
+    with a school in front ("MIT 9.522", "Harvard AM 207") is also keyed by
+    the bare code, so a file whose alias is "9.522" still links to it."""
     out: dict[str, list] = {}
     for n in db.all_nodes(conn):
-        out.setdefault(_norm(n["name"]), []).append(n)
+        key = _norm(n["name"])
+        out.setdefault(key, []).append(n)
+        bare = _SCHOOL_PREFIX.sub("", key)
+        if bare != key and len(bare) >= 3:
+            out.setdefault(bare, []).append(n)
     return out
 
 
@@ -317,7 +339,8 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
     ensure_schema(conn)
     q = query.lower().strip()
     q_tokens = tokens_of(q) or ({q} if q else set())
-    rows = conn.execute("SELECT path, kind, title, aliases, tokens, updated, embedding FROM vault_files").fetchall()
+    q_tokens = (q_tokens - _QUERY_STOP) or q_tokens  # never strip a query down to nothing
+    rows = conn.execute("SELECT path, kind, title, aliases, summary, tokens, updated, embedding FROM vault_files").fetchall()
     if not rows:
         return []
     seeded: dict[str, list[str]] = {}
@@ -327,10 +350,15 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
                               f" WHERE f.node_id IN ({marks})", list(seed_node_ids)):
             seeded.setdefault(r["path"], []).append(r["name"])
 
+    who = bool(_WHO_RE.search(q))
     hits: dict[str, dict] = {}
     for r in rows:
         aliases = json.loads(r["aliases"] or "[]")
         head = f"{r['title']} {' '.join(aliases)}".lower()
+        if who and r["kind"] == "person":
+            # a person file's first lines are the role ("CS 2881R classmate at
+            # Harvard SEAS"): for a who-question that is head text, not body text
+            head += " " + (r["summary"] or "").lower()
         head_tokens = tokens_of(head)
         body_tokens = set((r["tokens"] or "").split())
         t_hits = sum(1 for t in q_tokens if any(db._stem_eq(t, h) for h in head_tokens))
@@ -341,6 +369,9 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
             why.append("title match" if t_hits == len(q_tokens) else f"title match {t_hits}/{len(q_tokens)}")
         elif b_hits:
             why.append(f"body match {b_hits}/{len(q_tokens)}")
+        if who and r["kind"] == "person" and (t_hits or b_hits):
+            score += 3  # worth a title match: a who-question is answered from people files
+            why.append("who-question: person file")
         if q and q in head:
             score += 2 * len(q_tokens)
             why.append("exact phrase")
@@ -377,6 +408,14 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
                 hits[t] = {"path": t, "title": m["title"], "kind": m["kind"], "score": 1.0,
                            "why": [f"linked from {h['path']}"], "updated": m["updated"] or ""}
     out = sorted(hits.values(), key=order)[:k]
+    if who:  # reserve a few slots for the best-matching people files
+        have = {h["path"] for h in out}
+        extra = [h for h in sorted(hits.values(), key=order)
+                 if h["kind"] == "person" and h["path"] not in have][:WHO_SLOTS]
+        if extra:
+            keep = [h for h in out if h["kind"] == "person"] + \
+                   [h for h in out if h["kind"] != "person"][:max(0, k - len(extra) - sum(1 for h in out if h["kind"] == "person"))]
+            out = sorted(keep + extra, key=order)[:k]
     for h in out:
         h.pop("updated", None)
     return out
