@@ -384,6 +384,31 @@ class IngestTests(BrainTestCase):
                      "Alvin's Apartment", "Cross-Registration", "AC 215", ""):
             self.assertFalse(extract.is_vague_name(good), good)
 
+    def test_a_course_typed_as_an_event_becomes_a_concept(self):
+        """The model keeps typing courses "event" (a semester is time-bound), which
+        gave "AC215" a 7-day half-life next to the "AC 215" concept. A node that
+        is just a course code is retyped at extraction; a real event keeps its type."""
+        orig = llm.generate
+        llm.generate = lambda *a, **k: json.dumps({"nodes": [
+            {"name": "AC 215 course", "type": "event"},
+            {"name": "MIT 6.4212", "type": "event"},
+            {"name": "STAT211", "type": "Event"},
+            {"name": "MIT 6.4212 Petition Approval", "type": "event"},
+            {"name": "Fall 2026", "type": "event"},
+            {"name": "AY1653", "type": "event"},
+        ], "edges": []})
+        try:
+            ex = extract.extract("text")
+        finally:
+            llm.generate = orig
+        types = {n["name"]: n["type"] for n in ex["nodes"]}
+        self.assertEqual(types["AC 215 course"], "concept")
+        self.assertEqual(types["MIT 6.4212"], "concept")
+        self.assertEqual(types["STAT211"], "concept")
+        self.assertEqual(types["MIT 6.4212 Petition Approval"], "event")
+        self.assertEqual(types["Fall 2026"], "event")                # a season, not a course
+        self.assertEqual(types["AY1653"], "event")                   # a flight, not a course
+
 
     def test_merge_reroots_detached_categories(self):
         """A category that lost its part_of edge to the person (decay, a bad

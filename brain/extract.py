@@ -18,6 +18,18 @@ _VAGUE_NAME = re.compile(
 )
 
 
+# A node that is *just* a course code ("AC 215", "STAT211", "CS 2881R",
+# "MIT 6.4212", "AC 215 course") — optionally with a school in front or the
+# word course behind. The letters are upper-case (so "Fall 2026" is not a
+# course) and a code without a space needs three of them (so the flight
+# "AY1653" is not one). "MIT 6.4212 Petition Approval" does not match: an event.
+_COURSE_NAME = re.compile(
+    r"^(?:(?i:harvard|mit|aalto|stanford)\s+)?"
+    r"(?:[A-Z]{2,5}\s\d{1,4}[A-Z]?|[A-Z]{3,5}\d{1,4}[A-Z]?|\d{1,2}\.[A-Z]?\d{3,4})"
+    r"(?:\s+(?i:course|class|module))?$"
+)
+
+
 def is_vague_name(name) -> bool:
     """True for names like "New Project (Harvard)", "the meeting", "Unknown",
     "TBD" — a generic noun with at most determiners in front and an optional
@@ -68,7 +80,8 @@ Node types — pick the most specific one that fits:
                  "Relationships", "Health", "Education") used to organise the tree
   person       — a human being
   organization — a company, university, institution, team
-  concept      — an abstract idea, theory, or domain of knowledge
+  concept      — an abstract idea, theory, or domain of knowledge (a course or
+                 module is a concept; its start, deadline or exam is the event)
   skill        — a concrete capability someone has or is learning
   project      — an ongoing body of work with a goal
   artifact     — a document, slide deck, codebase, file, or physical object
@@ -189,6 +202,11 @@ def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None
     # point at them fall away downstream (no id to resolve)
     result["nodes"] = [n for n in (result.get("nodes") or [])
                        if isinstance(n, dict) and not is_vague_name(n.get("name"))]
+    for n in result["nodes"]:
+        # a course named by its code is a body of study, not a 7-day event —
+        # the model keeps typing it "event" because a semester is time-bound
+        if (n.get("type") or "").lower() == "event" and _COURSE_NAME.match((n.get("name") or "").strip()):
+            n["type"] = "concept"
     return result
 
 
