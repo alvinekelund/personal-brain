@@ -277,6 +277,28 @@ FALLBACK_CATEGORY = {
 }
 
 
+_LEAF_TYPES = ("fact", "event", "artifact", "insight")
+
+
+def _edge_parent(conn, db, extracted: dict, node, name_to_id: dict, identity_id: str):
+    """For a parentless leaf-type node, the single existing non-category node
+    (never the person) that the extraction's own edges connect it to — the
+    natural parent the model implied but did not name. None if ambiguous."""
+    if node["type"] not in _LEAF_TYPES:
+        return None
+    cands: set[str] = set()
+    for e in extracted.get("edges", []):
+        s, t = (e.get("source") or "").strip(), (e.get("target") or "").strip()
+        other = t if s == node["name"] else (s if t == node["name"] else None)
+        oid = name_to_id.get(other) if other else None
+        if not oid or oid == node["id"] or oid == identity_id:
+            continue
+        o = db.get_node(conn, oid)
+        if o and o["type"] != "category":
+            cands.add(oid)
+    return next(iter(cands)) if len(cands) == 1 else None
+
+
 def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, user: str):
     """Build the hierarchy spine and enforce that it's a real tree:
 
@@ -344,8 +366,11 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
             if e["target_id"] == identity["id"]:
                 db.delete_edge(conn, e["id"])
         non_person_parents = [e for e in part_edges if e["target_id"] != identity["id"]]
-        if not non_person_parents:  # orphan or was only under the person → give it a category
-            cat_id = ensure_category(FALLBACK_CATEGORY.get(node["type"], "Misc"))
+        if not non_person_parents:  # orphan or was only under the person → give it a home
+            # a fact about a club belongs under the club: prefer the one existing
+            # node the extraction's own edges connect this node to, else the type's area
+            cat_id = (_edge_parent(conn, db, extracted, node, name_to_id, identity["id"])
+                      or ensure_category(FALLBACK_CATEGORY.get(node["type"], "Misc")))
             if cat_id != nid:
                 new_edges.append(db.add_edge(conn, nid, cat_id, "part_of"))
 

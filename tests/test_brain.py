@@ -532,6 +532,39 @@ class IngestTests(BrainTestCase):
         self.assertIsNone(n["embedding"])                                   # refreshed by the embed stage
         self.assertEqual(len(db.all_nodes(self.conn)), 3)                   # Alvin, Hobbies, the club: no duplicate
 
+    def test_parentless_fact_goes_under_the_node_its_edge_names(self):
+        """The fact "Treasurer of Aalto Triathlon Club" arrived without a parent
+        and fell into the type fallback (Knowledge) although the extraction's
+        own edge tied it to the club. The implied parent wins over the fallback;
+        an ambiguous case (two candidates) still falls back."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        responses = iter([json.dumps({"nodes": [
+            {"name": "Aalto Triathlon Club", "type": "organization", "parent": "Hobbies"},
+            {"name": "Treasurer of Aalto Triathlon Club", "type": "fact",
+             "content": "Alvin is the club's Treasurer."},                     # no parent
+            {"name": "Team kit", "type": "artifact"},
+            {"name": "Trimtex", "type": "organization", "parent": "Hobbies"},
+        ], "edges": [
+            {"source": "Treasurer of Aalto Triathlon Club", "target": "Aalto Triathlon Club", "relation": "relates_to"},
+            {"source": "Team kit", "target": "Aalto Triathlon Club", "relation": "relates_to"},
+            {"source": "Team kit", "target": "Trimtex", "relation": "created_by"},      # two candidates
+        ]}), "{}"])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            extract.ingest(self.conn, "text", source="t", user="Alvin")
+        finally:
+            llm.generate = orig
+
+        def parent_name(name):
+            nid = db.get_node_by_name(self.conn, name)["id"]
+            pid = next(e["target_id"] for e in db.edges_for_node(self.conn, nid)
+                       if e["source_id"] == nid and e["relation"] == "part_of")
+            return db.get_node(self.conn, pid)["name"]
+
+        self.assertEqual(parent_name("Treasurer of Aalto Triathlon Club"), "Aalto Triathlon Club")
+        self.assertEqual(parent_name("Team kit"), "Artifacts")                # ambiguous → type fallback
+
     def test_who_questions_seed_person_nodes_first(self):
         """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
         "Harvard ..." on the real brain, so no people reached the answer. On a
