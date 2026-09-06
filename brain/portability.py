@@ -11,18 +11,23 @@ from brain import db
 SCHEMA_VERSION = 1
 
 
-def export_brain(conn) -> dict:
+def export_brain(conn, lean: bool = False) -> dict:
+    """Every node and edge with all fields. Embeddings ride along by default so a
+    restore is complete (about 40 KB per node; `lean=True` drops them and a
+    restore then needs `brain reindex`, one API call per node)."""
     nodes = []
     for r in conn.execute("SELECT * FROM nodes").fetchall():
         d = dict(r)
-        d.pop("embedding", None)  # bulky + recomputable via `brain reindex`; keep exports lean
+        d.pop("path", None)  # recomputed by `brain index`
+        if lean:
+            d.pop("embedding", None)
         nodes.append(d)
     edges = [dict(r) for r in conn.execute("SELECT * FROM edges").fetchall()]
     return {"schema_version": SCHEMA_VERSION, "nodes": nodes, "edges": edges}
 
 
-def export_to_file(conn, path) -> dict:
-    data = export_brain(conn)
+def export_to_file(conn, path, lean: bool = False) -> dict:
+    data = export_brain(conn, lean=lean)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     return data
@@ -46,16 +51,21 @@ def import_brain(conn, data: dict) -> tuple:
                 id_map[nid] = existing["id"]
             continue
         node_type = n.get("type", "concept")
+        last_accessed = n.get("last_accessed", db.now())
+        emb = n.get("embedding")
         conn.execute(
             "INSERT INTO nodes (id,name,type,content,source,created_at,last_accessed,"
-            "access_count,weight,confidence,half_life_days,archived) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "access_count,weight,confidence,half_life_days,archived,importance,last_decayed,embedding) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (nid, name, node_type, n.get("content", ""), n.get("source", ""),
-             n.get("created_at", db.now()), n.get("last_accessed", db.now()),
+             n.get("created_at", db.now()), last_accessed,
              int(n.get("access_count", 0)), float(n.get("weight", 1.0)),
              float(n.get("confidence", 0.8)),
              float(n.get("half_life_days", db.HALF_LIVES.get(node_type, 60.0))),
-             int(n.get("archived", 0))),
+             int(n.get("archived", 0)),
+             float(n.get("importance", 0.5)),          # was dropped: every restored node became 0.5
+             float(n.get("last_decayed", last_accessed)),
+             emb if isinstance(emb, str) else (json.dumps(emb) if emb else None)),
         )
         existing_ids.add(nid)
         existing_names.add(key)

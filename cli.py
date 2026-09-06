@@ -635,11 +635,13 @@ def reinforce(node_id):
 
 @cli.command("export")
 @click.argument("path", required=False, default="brain-export.json")
-def export_cmd(path):
-    """Export the whole brain (nodes + edges) to a JSON file."""
+@click.option("--lean", is_flag=True, help="leave the embeddings out (a restore then needs `brain reindex`)")
+def export_cmd(path, lean):
+    """Export the whole brain (nodes + edges, embeddings, importance, decay clocks) to a JSON file."""
     conn = db.connect()
-    data = portability.export_to_file(conn, path)
-    click.echo(f"Exported {len(data['nodes'])} node(s), {len(data['edges'])} edge(s) to {path}")
+    data = portability.export_to_file(conn, path, lean=lean)
+    click.echo(f"Exported {len(data['nodes'])} node(s), {len(data['edges'])} edge(s) to {path}"
+               + (" (lean: no embeddings)" if lean else ""))
 
 
 @cli.command("import")

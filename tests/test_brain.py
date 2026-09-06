@@ -1884,6 +1884,27 @@ class PortabilityTests(BrainTestCase):
         # edge studied_by remapped onto the existing nodes
         self.assertEqual(len(db.all_edges(dest)), 1)
 
+    def test_restore_keeps_importance_embeddings_and_decay_clock(self):
+        """A restore must be exact: import used to drop importance (every node
+        came back at 0.5, breaking decay and the digest), last_decayed and the
+        embedding (a restore then cost one API call per node)."""
+        a = db.add_node(self.conn, "Anna Houstecka", type_="person", importance=1.0)
+        db.set_embedding(self.conn, a, [0.5, 0.25])
+        self.conn.execute("UPDATE nodes SET last_decayed = 123456.0 WHERE id = ?", (a,))
+        self.conn.commit()
+        full = portability.export_brain(self.conn)
+        node = next(x for x in full["nodes"] if x["name"] == "Anna Houstecka")
+        self.assertEqual(json.loads(node["embedding"]), [0.5, 0.25])
+        self.assertNotIn("path", node)                                      # recomputed by brain index
+        lean = portability.export_brain(self.conn, lean=True)
+        self.assertNotIn("embedding", next(x for x in lean["nodes"] if x["name"] == "Anna Houstecka"))
+        dest = self._fresh_conn()
+        portability.import_brain(dest, full)
+        r = db.get_node(dest, a)
+        self.assertEqual(r["importance"], 1.0)
+        self.assertEqual(r["last_decayed"], 123456.0)
+        self.assertEqual(json.loads(r["embedding"]), [0.5, 0.25])
+
 
 class LLMRetryTests(unittest.TestCase):
     class _FakeResp:
