@@ -847,6 +847,48 @@ class DeleteNodeTests(BrainTestCase):
         self.assertEqual(db.edges_for_node(self.conn, c), [])
 
 
+class MoveNodeTests(BrainTestCase):
+    """db.move_node — deterministic re-homing that keeps the tree a tree."""
+
+    def setUp(self):
+        super().setUp()
+        c = self.conn
+        db.ensure_identity_anchor(c, "Alvin")
+        self.me = db.get_node_by_name(c, "Alvin")["id"]
+        self.knowledge = db.add_node(c, "Knowledge", type_="category"); db.add_edge(c, self.knowledge, self.me, "part_of")
+        self.home = db.add_node(c, "Alvin's Home", type_="category"); db.add_edge(c, self.home, self.me, "part_of")
+        self.flat = db.add_node(c, "Alvin's Apartment", type_="fact"); db.add_edge(c, self.flat, self.knowledge, "part_of")
+        self.area = db.add_node(c, "Boston area", type_="fact"); db.add_edge(c, self.area, self.flat, "part_of")
+        db.add_edge(c, self.flat, self.me, "relates_to")  # a cross-link, must survive the move
+        c.commit()
+
+    def _parents(self, nid):
+        return [e["target_id"] for e in db.edges_for_node(self.conn, nid)
+                if e["source_id"] == nid and e["relation"] == "part_of"]
+
+    def test_moves_under_the_new_parent_and_keeps_cross_links(self):
+        self.assertIsNone(db.move_node(self.conn, self.flat, self.home, ident_id=self.me))
+        self.assertEqual(self._parents(self.flat), [self.home])           # exactly one parent, the new one
+        self.assertEqual(self._parents(self.area), [self.flat])           # subtree came along untouched
+        cross = [e for e in db.edges_for_node(self.conn, self.flat) if e["relation"] == "relates_to"]
+        self.assertEqual(len(cross), 1)
+
+    def test_refuses_a_cycle(self):
+        err = db.move_node(self.conn, self.flat, self.area, ident_id=self.me)  # under its own child
+        self.assertIn("cycle", err)
+        self.assertEqual(self._parents(self.flat), [self.knowledge])      # unchanged
+
+    def test_refuses_self_and_missing(self):
+        self.assertIn("own parent", db.move_node(self.conn, self.flat, self.flat))
+        self.assertIn("not found", db.move_node(self.conn, self.flat, "nope"))
+
+    def test_category_rules_only_with_the_identity(self):
+        self.assertIn("category", db.move_node(self.conn, self.home, self.knowledge, ident_id=self.me))
+        self.assertIn("categories", db.move_node(self.conn, self.flat, self.me, ident_id=self.me))
+        self.assertIsNone(db.move_node(self.conn, self.home, self.me, ident_id=self.me))  # category → person is fine
+        self.assertEqual(self._parents(self.home), [self.me])
+
+
 class HierarchyTests(BrainTestCase):
     def _parents_of(self, node_id):
         return {e["target_id"] for e in db.edges_for_node(self.conn, node_id)

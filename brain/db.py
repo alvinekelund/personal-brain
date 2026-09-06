@@ -454,6 +454,43 @@ def merge_nodes(conn, keep_id, drop_id) -> bool:
     return True
 
 
+def move_node(conn, node_id, parent_id, ident_id=None):
+    """Re-home a node: its single `part_of` parent becomes parent_id. The
+    deterministic counterpart to `reorganize` (which asks the LLM to re-plan
+    everything). Keeps the tree invariants and refuses, returning the reason,
+    when: a node is missing; node == parent; the parent lies inside the node's
+    own subtree (a cycle); or, when the identity node is given, a category is
+    moved under anything but the person, or a non-category directly under the
+    person. Returns None on success."""
+    node, parent = get_node(conn, node_id), get_node(conn, parent_id)
+    if not node or not parent:
+        return "node or parent not found"
+    if node_id == parent_id:
+        return "a node cannot be its own parent"
+    if ident_id:
+        if node["type"] == "category" and parent_id != ident_id:
+            return "a category can only hang directly off the person"
+        if node["type"] != "category" and parent_id == ident_id:
+            return "only categories hang directly off the person — pick a category"
+    stack, seen = [node_id], set()
+    while stack:  # the parent must not sit inside the node's own subtree
+        cur = stack.pop()
+        if cur == parent_id:
+            return "that parent is inside the node's own subtree (would make a cycle)"
+        if cur in seen:
+            continue
+        seen.add(cur)
+        stack.extend(r[0] for r in conn.execute(
+            "SELECT source_id FROM edges WHERE target_id = ? AND relation = 'part_of'", (cur,)))
+    for e in edges_for_node(conn, node_id):
+        if e["source_id"] == node_id and e["relation"] == "part_of":
+            delete_edge(conn, e["id"])
+    add_edge(conn, node_id, parent_id, "part_of")
+    touch_node(conn, node_id)
+    conn.commit()
+    return None
+
+
 # ── Ingestion log ──────────────────────────────────────────────────────────
 
 def log_ingestion(conn, raw_text, source, node_ids, edge_ids):

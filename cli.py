@@ -492,6 +492,34 @@ def merge(id1, id2):
     click.echo(f"Merged {n2['name']} → {n1['name']}")
 
 
+@cli.command()
+@click.argument("node")
+@click.argument("parent")
+def move(node, parent):
+    """Re-home NODE under PARENT (ids from `brain tree`, or exact names).
+
+    The deterministic alternative to `reorganize`: one node, one new parent,
+    tree rules enforced (no cycles, categories only under you, nothing else
+    directly under you)."""
+    conn = db.connect()
+
+    def resolve(ref):
+        return db.get_node(conn, ref) or db.get_node_by_name(conn, ref)
+
+    n, p = resolve(node), resolve(parent)
+    if not n or not p:
+        click.echo("Node or parent not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    user = config.get_user()
+    ident = db.get_node_by_name(conn, user) if user else None
+    err = db.move_node(conn, n["id"], p["id"], ident_id=ident["id"] if ident else None)
+    if err:
+        click.echo(f"Not moved: {err}", err=True)
+        sys.exit(1)
+    vault.auto_render(conn, user)
+    click.echo(f"Moved {n['name']} → under {p['name']}")
+
+
 # ── forget ────────────────────────────────────────────────────────────────────
 
 @cli.command()
