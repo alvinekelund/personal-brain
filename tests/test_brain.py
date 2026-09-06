@@ -914,6 +914,31 @@ class RenameNodeTests(BrainTestCase):
         self.assertEqual(db.get_node(self.conn, a)["name"], "Ac 215")
 
 
+class RetypeNodeTests(BrainTestCase):
+    def test_retype_follows_the_half_life_and_maps_synonyms(self):
+        a = db.add_node(self.conn, "Triathlon", type_="event")
+        self.conn.commit()
+        self.assertEqual(db.get_node(self.conn, a)["half_life_days"], db.HALF_LIVES["event"])
+        self.assertIsNone(db.retype_node(self.conn, a, "concept"))
+        n = db.get_node(self.conn, a)
+        self.assertEqual((n["type"], n["half_life_days"]), ("concept", db.HALF_LIVES["concept"]))
+        self.assertIsNone(db.retype_node(self.conn, a, " Company "))      # synonym, case/space-insensitive
+        self.assertEqual(db.get_node(self.conn, a)["type"], "organization")
+        self.assertIsNone(db.retype_node(self.conn, a, "organization"))   # same type: no-op
+
+    def test_refusals_leave_the_node_untouched(self):
+        cat = db.add_node(self.conn, "Hobbies", type_="category")
+        a = db.add_node(self.conn, "Padel", type_="skill")
+        self.conn.commit()
+        self.assertIn("not found", db.retype_node(self.conn, "nope", "fact"))
+        self.assertIn("unknown type", db.retype_node(self.conn, a, "banana"))
+        self.assertIn("LOOPS.md", db.retype_node(self.conn, a, "task"))
+        self.assertIn("tree change", db.retype_node(self.conn, a, "category"))
+        self.assertIn("tree change", db.retype_node(self.conn, cat, "concept"))
+        n = db.get_node(self.conn, a)
+        self.assertEqual((n["type"], n["half_life_days"]), ("skill", db.HALF_LIVES["skill"]))
+
+
 class HierarchyTests(BrainTestCase):
     def _parents_of(self, node_id):
         return {e["target_id"] for e in db.edges_for_node(self.conn, node_id)

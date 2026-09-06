@@ -173,6 +173,7 @@ brain forget <node-id>           # immediately archive
 brain merge <id1> <id2>          # merge id2 into id1 (keeps one parent, takes the higher importance)
 brain move <node> <parent>       # re-home a node (ids or exact names); no cycles, categories only under you
 brain rename <node> <new-name>   # rename in place (refuses a name another node carries — merge instead)
+brain retype <node> <type>       # change the type; the decay half-life follows (never into/out of category)
 
 # Backup / portability
 brain export backup.json         # dump the whole graph to JSON

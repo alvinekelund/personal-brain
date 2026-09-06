@@ -547,6 +547,25 @@ def rename(node, new_name):
     click.echo(f"Renamed {old!r} → {new_name!r}  (run `brain index` to re-link it to a vault file)")
 
 
+@cli.command()
+@click.argument("node")
+@click.argument("new_type")
+def retype(node, new_type):
+    """Change NODE's type (event, fact, artifact, concept, insight, skill, project,
+    person, organization); its decay half-life follows the new type."""
+    conn = db.connect()
+    n = db.get_node(conn, node) or db.get_node_by_name(conn, node)
+    if not n:
+        click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    err = db.retype_node(conn, n["id"], new_type)
+    if err:
+        click.echo(f"Not retyped: {err}", err=True)
+        sys.exit(1)
+    vault.auto_render(conn, config.get_user())
+    click.echo(f"Retyped {n['name']!r}: {n['type']} → {db.get_node(conn, n['id'])['type']}")
+
+
 # ── forget ────────────────────────────────────────────────────────────────────
 
 @cli.command()

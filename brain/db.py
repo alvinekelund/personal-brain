@@ -512,6 +512,34 @@ def rename_node(conn, node_id, new_name) -> str | None:
     return None
 
 
+def retype_node(conn, node_id, new_type) -> str | None:
+    """Change a node's type in place; its decay half-life follows the new type
+    (an event fades in a week, a concept in months, a person never — so a
+    mis-typed node decays wrong). Refuses, returning the reason, for a missing
+    node, a type outside the vocabulary (synonyms such as "company" are
+    mapped), `task` (tasks live in LOOPS.md), and any change into or out of
+    `category` (that is a tree change: `brain move` / `brain merge`).
+    Returns None on success (a same-type call is a no-op)."""
+    node = get_node(conn, node_id)
+    if not node:
+        return "node not found"
+    raw = (new_type or "").strip().lower()
+    if raw not in HALF_LIVES and raw not in _TYPE_SYNONYMS:
+        return (f"unknown type {new_type!r} — one of: "
+                + ", ".join(k for k in HALF_LIVES if k not in ("task", "category")))
+    t = normalize_type(raw)
+    if t == "task":
+        return "tasks are not graph nodes — they live in LOOPS.md (`brain loop add`)"
+    if (t == "category") != (node["type"] == "category"):
+        return "into or out of `category` is a tree change — use `brain move` / `brain merge`"
+    if t != node["type"]:
+        conn.execute("UPDATE nodes SET type = ?, half_life_days = ? WHERE id = ?",
+                     (t, HALF_LIVES[t], node_id))
+        touch_node(conn, node_id)
+        conn.commit()
+    return None
+
+
 # ── Ingestion log ──────────────────────────────────────────────────────────
 
 def log_ingestion(conn, raw_text, source, node_ids, edge_ids):
