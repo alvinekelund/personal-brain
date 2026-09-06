@@ -37,6 +37,7 @@ class Report:
     missing_embeddings: int = 0
     duplicates: list[tuple[str, str]] = field(default_factory=list)  # suspiciously similar names, same type
     legacy_tasks: list[str] = field(default_factory=list)
+    oversized: list[tuple[str, int]] = field(default_factory=list)   # categories with too many direct children
 
     @property
     def structural(self) -> int:
@@ -46,7 +47,8 @@ class Report:
 
     @property
     def clean(self) -> bool:
-        return self.structural == 0 and not self.duplicates and not self.legacy_tasks
+        return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
+                and not self.oversized)
 
     def summary(self) -> str:
         bits = []
@@ -59,6 +61,8 @@ class Report:
         if self.dangling_edges: bits.append(f"{self.dangling_edges} dangling edge(s) to deleted nodes")
         if self.legacy_tasks: bits.append(f"{len(self.legacy_tasks)} legacy task node(s)")
         if self.duplicates: bits.append(f"{len(self.duplicates)} possible duplicate pair(s)")
+        if self.oversized:
+            bits.append("oversized: " + ", ".join(f"{n} ({c})" for n, c in self.oversized[:4]) + " (brain subgroup)")
         if self.missing_embeddings: bits.append(f"{self.missing_embeddings} node(s) without embeddings (brain reindex)")
         return "; ".join(bits) if bits else "tree intact"
 
@@ -82,8 +86,11 @@ _DANGLING_WHERE = (
 )
 
 
-def check(conn, user: str = "") -> Report:
+def check(conn, user: str = "", oversized_threshold: int | None = None) -> Report:
     r = Report()
+    if oversized_threshold is None:
+        from brain.extract import SUBGROUP_THRESHOLD
+        oversized_threshold = SUBGROUP_THRESHOLD
     # edges left behind by a deleted node (the schema has no ON DELETE CASCADE):
     # invisible to the tree walk below, which is exactly why they must be counted
     r.dangling_edges = conn.execute(f"SELECT COUNT(*) FROM edges {_DANGLING_WHERE}").fetchone()[0]
@@ -115,6 +122,16 @@ def check(conn, user: str = "") -> Report:
         emb = n["embedding"] if "embedding" in n.keys() else None
         if not emb:
             r.missing_embeddings += 1
+    # a category with more direct non-category children than the sub-grouping
+    # threshold is a flat list, not structure: say so, and name the cure
+    child_count: dict[str, int] = {}
+    for nid, ps in parents.items():
+        if nodes[nid]["type"] != "category":
+            for p in ps:
+                child_count[p] = child_count.get(p, 0) + 1
+    r.oversized = sorted(((nodes[p]["name"], c) for p, c in child_count.items()
+                          if nodes[p]["type"] == "category" and c > oversized_threshold),
+                         key=lambda x: -x[1])
     # cycles along part_of (single-parent walk from every node; multi-parent nodes follow every parent)
     seen_cycles: set[frozenset] = set()
     for start in nodes:

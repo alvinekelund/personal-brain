@@ -69,6 +69,11 @@ class IntegrityTests(BrainTestCase):
         self.assertFalse([p for p in r.duplicates if "Miracle summer job" in p])  # same file, other type: not a dupe
         self.assertFalse([p for p in r.duplicates if set(p) == {"Miracle Consulting Group", "Miracle SEA"}])  # parent/child
         self.assertIn(("AC 215", "AC215"), r.duplicates)                          # same name, two types
+        self.assertEqual(r.oversized, [])                                          # default threshold (12) not hit
+        r3 = integrity.check(self.conn, "Alvin", oversized_threshold=3)
+        self.assertTrue(r3.oversized and r3.oversized[0][0] == "Education", r3.oversized)
+        self.assertIn("(brain subgroup)", r3.summary())
+        self.assertFalse(r3.clean)
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())
