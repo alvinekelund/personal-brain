@@ -544,18 +544,28 @@ def brief(root: Path, today: date | None = None, limit: int = 200) -> str:
     today = today or date.today()
     ledger = load(root)
     open_ = sorted((l for l in ledger.open if not l.waiting_on), key=lambda l: (l.due, l.prio, l.id))
-    parts = []
+    if not open_:
+        return "No open loops."
+    text = ""
     for l in open_:
         n = (l.due - today).days
         when = "today" if n == 0 else (f"overdue {-n}d" if n < 0 else f"{n}d")
-        parts.append(f"{l.title} ({when}): {l.next}")
-    text = ""
-    for p in parts:
-        cand = (text + " · " if text else "") + p
-        if len(cand) > limit:
-            break
-        text = cand
-    return text or "No open loops."
+        head = f"{l.title} ({when})"
+        sep = " · " if text else ""
+        if text and len(text) + len(sep) + len(head) > limit:
+            break  # no room for another loop's headline
+        # the next action rides along only as far as it fits; a long one is cut,
+        # never allowed to push the loop itself off the phone (55 open loops once
+        # read "No open loops." because the first next-action was a paragraph)
+        room = limit - len(text) - len(sep) - len(head)
+        nxt = (l.next or "").strip()
+        if nxt and room > 12:
+            nxt = nxt if len(nxt) + 2 <= room else nxt[: room - 3].rstrip() + "…"
+            head += f": {nxt}"
+        if not text and len(head) > limit:
+            head = head[: limit - 1].rstrip() + "…"
+        text += sep + head
+    return text
 
 
 # ── inbox: action items the extractor found, awaiting triage into real loops ──

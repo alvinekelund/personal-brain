@@ -240,6 +240,24 @@ class TodayTests(LoopsTestCase):
         self.assertIn("boaz-barak 7d", nag)
         self.assertIn("← nudge", nag)
 
+    def test_brief_never_drops_the_top_loop_for_a_long_next_action(self):
+        """Regression (Sep 6 2026): with next-actions that are paragraphs, the
+        first "title (when): next" exceeded 200 chars, the loop broke, and the
+        phone push read "No open loops." for 55 open loops."""
+        long_next = "verify the addresses in the MIT directory, send the three drafts, " * 6
+        self.add("Send the three remaining MIT instructor emails", "2026-09-02", "alvin", "harvard", long_next)
+        self.add("Ask Protopapas about a late arrival", "2026-09-03", "alvin", "harvard", "send the Gmail draft")
+        b = loops.brief(self.root, TODAY)
+        self.assertNotEqual(b, "No open loops.")
+        self.assertLessEqual(len(b), 200)
+        self.assertTrue(b.startswith("Send the three remaining MIT instructor emails (1d): verify"), b)
+        self.assertIn("…", b)                                   # the long next-action was cut, not dropped
+        # with a short first next-action, the second loop still rides along when it fits
+        loops.edit(self.root, "L-001", next_="send them", commit=False)
+        b = loops.brief(self.root, TODAY)
+        self.assertIn("Ask Protopapas about a late arrival", b)
+        self.assertLessEqual(len(b), 200)
+
     def test_brief_fits_a_push(self):
         for i in range(6):
             self.add(title=f"Loop number {i} with a long title", due="2026-09-03",
