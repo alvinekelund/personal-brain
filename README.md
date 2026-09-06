@@ -20,7 +20,7 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Visualization** — `brain show` opens an interactive force-directed graph: categories are large hubs, the `part_of` backbone is solid arrows, cross-links are dashed, node size reflects importance. Hover for content; filter by weight or type.
 
-**Context injection** — `brain context "ML internships"` seeds from keyword → semantic → whole-brain (in that order), BFS-traverses (hub-aware), then calls Gemini to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
+**Context injection** — `brain context "ML internships"` seeds from keyword → semantic → whole-brain (in that order), BFS-traverses (hub-aware), adds the topic's vault file excerpts and ledger lines (the file wins over the graph; dates and numbers come from the files), then calls Gemini to synthesise a structured document: Background, Active Skills, Current Focus, Projects, Open Questions. Pipe it straight into any AI conversation.
 
 **Synthesis** — `brain synthesize` finds isolated nodes and connects them to the graph, surfacing relationships Gemini notices across your knowledge.
 
