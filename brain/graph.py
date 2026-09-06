@@ -157,7 +157,16 @@ def context_material(conn, topic: str, nodes: dict, root=None) -> tuple[list[str
     files and the ledger lines that match the topic. Empty topic → nothing
     (the whole-brain briefing has no query to route). Best-effort: never raises."""
     if not (topic or "").strip():
-        return [], []
+        # the whole-brain briefing (what sessions call at start) gets NOW.md —
+        # the generated "what is going on" view — so it reflects the true state
+        from brain import config, index as _index
+        try:
+            now_md = Path(root) / "NOW.md" if root is not None else config.vault_dir() / "NOW.md"
+            text = now_md.read_text(encoding="utf-8").strip()
+            return (["### NOW.md (generated: what is going on right now)", _index._cut(text, 3500)]
+                    if text else []), []
+        except (OSError, TypeError):
+            return [], []
     qvec = None
     try:
         if llm.have_key():

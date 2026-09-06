@@ -341,7 +341,10 @@ class AnswerTests(IndexTestCase):
         file_lines, ledger_lines = graph.context_material(self.conn, "STAT 211 sections", nodes, root=self.root)
         self.assertTrue(any("courses/stat-211.md" in ln for ln in file_lines), file_lines)
         self.assertTrue(any("Cut rule for STAT 211" in ln for ln in ledger_lines), ledger_lines)
-        self.assertEqual(graph.context_material(self.conn, "   ", nodes, root=self.root), ([], []))
+        whole, ledger = graph.context_material(self.conn, "   ", nodes, root=self.root)   # whole-brain briefing
+        self.assertEqual(ledger, [])
+        self.assertTrue(whole and whole[0].startswith("### NOW.md"), whole)                # gets the generated state
+        self.assertIn("generated", whole[1])
         captured = {}
         orig = llm.generate
         llm.generate = lambda p, *a, **k: (captured.setdefault("p", p), "doc")[1]
