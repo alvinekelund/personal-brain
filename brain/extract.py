@@ -1,6 +1,28 @@
 import json
+import re
 import time
 from brain import llm
+
+# A node name that means nothing out of context — "New Project (Harvard)",
+# "the meeting", "Unknown" — is noise in retrieval and a duplicate magnet. The
+# prompt forbids them; this guard enforces it when the model slips.
+_GENERIC_NOUN = (
+    r"(?:projects?|tasks?|meetings?|events?|things?|items?|notes?|documents?|files?|"
+    r"person|people|places?|organi[sz]ations?|org|company|courses?|plans?|ideas?|topics?|"
+    r"updates?|stuff|misc|miscellaneous|unknown|untitled|n/a|tbd|none|null|entity|nodes?|others?)"
+)
+_VAGUE_NAME = re.compile(
+    rf"^(?:(?:a|an|the|this|that|some|my|our|his|her|their|new|another|random|generic)\s+)*"
+    rf"{_GENERIC_NOUN}(?:\s*\([^)]*\))?$",
+    re.IGNORECASE,
+)
+
+
+def is_vague_name(name) -> bool:
+    """True for names like "New Project (Harvard)", "the meeting", "Unknown",
+    "TBD" — a generic noun with at most determiners in front and an optional
+    parenthetical behind. "New York area" or "Meeting with Heli" are fine."""
+    return bool(_VAGUE_NAME.match((name or "").strip()))
 
 # Progress + wall-clock control for one ingest (L-061). `brain add` points
 # ON_STAGE at stderr so a scheduled task shows which stage a slow Gemini call is
@@ -61,6 +83,9 @@ Edge relations — pick the most specific one that fits:
 
 Rules:
 - names are short labels (2-5 words max)
+- names must be specific and self-explanatory out of context: "GCP project
+  ac215", not "New Project"; "Heli Helskyaho", not "my boss"; "AC 215", not
+  "the course". If the text gives no specific name, leave the node out.
 - content is 1-3 sentences explaining the node
 - edges use node names from the nodes list
 - confidence reflects how clearly the text supports this extraction
@@ -158,7 +183,13 @@ def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None
         )
 
     result = _parse_json(llm.generate(prompt, system=SYSTEM, response_json=True))
-    return result if isinstance(result, dict) else {"nodes": [], "edges": [], "tasks": []}
+    if not isinstance(result, dict):
+        return {"nodes": [], "edges": [], "tasks": []}
+    # drop nodes whose names mean nothing out of context; edges and parents that
+    # point at them fall away downstream (no id to resolve)
+    result["nodes"] = [n for n in (result.get("nodes") or [])
+                       if isinstance(n, dict) and not is_vague_name(n.get("name"))]
+    return result
 
 
 def extract(text: str, source: str = "", existing_names: list[str] | None = None,
@@ -246,6 +277,8 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
     for n in extracted.get("nodes", []):
         child = (n.get("name") or "").strip()
         parent = (n.get("parent") or "").strip()
+        if is_vague_name(parent):
+            parent = ""  # never let "New Project" become a category; the fallback applies
         if not child or not parent or parent.lower() == child.lower():
             continue
         child_id = name_to_id.get(child)

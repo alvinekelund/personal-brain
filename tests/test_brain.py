@@ -347,6 +347,43 @@ class IngestTests(BrainTestCase):
             llm.generate = orig
             extract.ON_STAGE = None
 
+    def test_vague_node_names_never_become_nodes_or_categories(self):
+        """Ambient capture once produced "New Project (Harvard)" for the AC 215
+        GCP project: a name that means nothing out of context. Such nodes are
+        dropped at extraction, and a vague *parent* never becomes a category."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        responses = iter([json.dumps({"nodes": [
+            {"name": "New Project (Harvard)", "type": "project", "parent": "Education"},
+            {"name": "GCP project ac215", "type": "project", "parent": "New Project"},
+            {"name": "New York area", "type": "fact", "parent": "Life Events"},
+        ], "edges": [{"source": "New Project (Harvard)", "target": "GCP project ac215",
+                      "relation": "relates_to"}]}), "{}"])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            extract.ingest(self.conn, "text", source="t", user="Alvin")
+        finally:
+            llm.generate = orig
+        names = {n["name"] for n in db.all_nodes(self.conn)}
+        self.assertNotIn("New Project (Harvard)", names)
+        self.assertNotIn("New Project", names)                       # vague parent → no category
+        self.assertIn("GCP project ac215", names)                    # re-homed under a fallback category
+        self.assertIn("New York area", names)                        # "New" + a specific name is fine
+        gcp = db.get_node_by_name(self.conn, "GCP project ac215")
+        parents = [e for e in db.edges_for_node(self.conn, gcp["id"])
+                   if e["source_id"] == gcp["id"] and e["relation"] == "part_of"]
+        self.assertEqual(len(parents), 1)
+
+
+    def test_vague_and_specific_names(self):
+        for bad in ("New Project (Harvard)", "the meeting", "Unknown", "TBD", "Untitled",
+                    "a new task", "Misc", "Other", "Some document", "This course (fall)"):
+            self.assertTrue(extract.is_vague_name(bad), bad)
+        for good in ("New York area", "Meeting with Heli", "The Token Company", "GCP project ac215",
+                     "Personal Dashboard Project", "Course preferences", "Job Search",
+                     "Alvin's Apartment", "Cross-Registration", "AC 215", ""):
+            self.assertFalse(extract.is_vague_name(good), good)
+
 
     def test_merge_reroots_detached_categories(self):
         """A category that lost its part_of edge to the person (decay, a bad
