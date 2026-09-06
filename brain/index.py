@@ -74,6 +74,13 @@ CREATE TABLE IF NOT EXISTS vault_file_nodes (
     how      TEXT NOT NULL,
     PRIMARY KEY (path, node_id)
 );
+CREATE TABLE IF NOT EXISTS ledger_embeddings (
+    key         TEXT PRIMARY KEY,   -- L-nnn / D-nnn
+    sha         TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    embedding   TEXT,
+    indexed_at  REAL NOT NULL
+);
 """
 
 
@@ -286,6 +293,7 @@ def build(conn, root: Path, embed: bool = True) -> dict:
                          (json.dumps(vec), rec["path"]))
             stats["embedded"] += 1
         conn.commit()
+    stats["ledger_embedded"] = embed_ledgers(conn, root, embed=embed)
     return stats
 
 
@@ -316,6 +324,86 @@ def status(conn, root: Path) -> dict:
     embedded = sum(1 for r in rows.values() if r["embedding"])
     return {"indexed": len(rows), "on_disk": len(on_disk), "new": new, "stale": stale,
             "removed": removed, "node_links": node_links, "embedded": embedded, "last_indexed": last}
+
+
+# ── the ledgers as retrieval targets ──────────────────────────────────────────
+# Loops and decisions are matched to a question by keyword overlap, which misses
+# a loop worded differently from the question ("what am I owed?" never reached
+# "collect the remaining 9 repayments"). Embed each loop and decision once
+# (incremental by content hash, like files) so ledger_context can add cosine hits.
+
+def ledger_records(root: Path) -> list[dict]:
+    """One record per loop (open and closed) and per decision: {key, text, sha}."""
+    from brain import decisions, loops
+    out: list[dict] = []
+    try:
+        ledger = loops.load(Path(root))
+        for l in ledger.open + ledger.closed:
+            out.append({"key": l.id, "text": f"{l.id} {l.title}. Next: {l.next}. {l.note}".strip()})
+    except Exception:
+        pass
+    try:
+        for d in decisions.load(Path(root))[0]:
+            out.append({"key": d.id, "text": f"{d.id} {d.title}. {d.decision} Why: {d.why}".strip()})
+    except Exception:
+        pass
+    for r in out:
+        r["sha"] = hashlib.sha256(r["text"].encode("utf-8")).hexdigest()[:16]
+    return out
+
+
+def embed_ledgers(conn, root: Path, embed: bool = True) -> int:
+    """Upsert the ledger records and embed the new or changed ones (parallel,
+    best-effort, only with a key). Returns the number embedded."""
+    from concurrent.futures import ThreadPoolExecutor
+    ensure_schema(conn)
+    records = ledger_records(root)
+    existing = {r["key"]: r for r in conn.execute("SELECT key, sha, embedding FROM ledger_embeddings")}
+    now = time.time()
+    todo = []
+    for rec in records:
+        old = existing.get(rec["key"])
+        if old and old["sha"] == rec["sha"]:
+            if embed and not old["embedding"]:
+                todo.append(rec)
+            continue
+        conn.execute("INSERT INTO ledger_embeddings (key, sha, text, embedding, indexed_at) VALUES (?,?,?,NULL,?)"
+                     " ON CONFLICT(key) DO UPDATE SET sha=excluded.sha, text=excluded.text, embedding=NULL,"
+                     " indexed_at=excluded.indexed_at", (rec["key"], rec["sha"], rec["text"], now))
+        if embed:
+            todo.append(rec)
+    for key in set(existing) - {r["key"] for r in records}:
+        conn.execute("DELETE FROM ledger_embeddings WHERE key = ?", (key,))
+    conn.commit()
+    done = 0
+    if todo and llm.have_key():
+        def fetch(rec):
+            try:
+                return rec["key"], llm.embed(rec["text"])
+            except Exception:
+                return rec["key"], None
+        with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
+            for key, vec in ex.map(fetch, todo):
+                if vec:
+                    conn.execute("UPDATE ledger_embeddings SET embedding = ? WHERE key = ?", (json.dumps(vec), key))
+                    done += 1
+        conn.commit()
+    return done
+
+
+def ledger_semantic(conn, query_vector, limit: int = 6, min_cos: float = SEMANTIC_ONLY_MIN) -> list[tuple[str, float]]:
+    """Ledger keys closest to the query vector, [(key, cosine)] best first."""
+    ensure_schema(conn)
+    scored = []
+    for r in conn.execute("SELECT key, embedding FROM ledger_embeddings WHERE embedding IS NOT NULL"):
+        try:
+            cos = _cosine(query_vector, json.loads(r["embedding"]))
+        except (TypeError, ValueError):
+            continue
+        if cos >= min_cos:
+            scored.append((r["key"], round(cos, 3)))
+    scored.sort(key=lambda x: (-x[1], x[0]))
+    return scored[:limit]
 
 
 # ── retrieval ─────────────────────────────────────────────────────────────────

@@ -272,7 +272,7 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
         seeds, qvec = [], None
     if not seeds:
         seeds = prefer_people(db.search_nodes(conn, retrieval_q, min_weight=min_weight)[:k * 4 if who else k])
-    ledger_lines, ledger_sources = ledger_context(retrieval_q, ledger_root)
+    ledger_lines, ledger_sources = ledger_context(retrieval_q, ledger_root, conn=conn, query_vector=qvec)
     # D-014: the vault directory is the source of truth — route the question to its files
     files, file_lines = file_context(conn, retrieval_q, seeds, ledger_root, query_vector=qvec)
     if not seeds and not ledger_lines and not files:
@@ -338,10 +338,14 @@ def file_context(conn, query: str, seeds: list, root=None, query_vector=None, n:
     return files, lines
 
 
-def ledger_context(query: str, root=None) -> tuple[list[str], list[str]]:
+def ledger_context(query: str, root=None, conn=None, query_vector=None,
+                   max_loops: int = 8, max_decisions: int = 6) -> tuple[list[str], list[str]]:
     """Decisions and loops matching the query, as prompt lines + source ids. The
     ledgers hold the most valuable facts (what was settled, what is pending), so
-    every answer sees them first. Missing vault → nothing."""
+    every answer sees them first. Keyword hits come first; with a connection and
+    a query vector, the closest embedded ledger lines (brain index) are added so
+    a loop worded differently from the question still reaches the answer.
+    Missing vault → nothing."""
     from brain import config, decisions, loops
     root = Path(root) if root is not None else config.vault_dir()
     lines, sources = [], []
@@ -350,6 +354,24 @@ def ledger_context(query: str, root=None) -> tuple[list[str], list[str]]:
         ls = loops.search(root, query, include_closed=True)
     except Exception:
         return [], []
+    if conn is not None and query_vector is not None:
+        try:
+            from brain import index as _index
+            hits = _index.ledger_semantic(conn, query_vector)
+            if hits:
+                have = {d.id for d in ds} | {l.id for l in ls}
+                ledger = loops.load(root)
+                by_loop = {l.id: l for l in ledger.open + ledger.closed}
+                by_dec = {d.id: d for d in decisions.load(root)[0]}
+                for key, _cos in hits:
+                    if key in have:
+                        continue
+                    if key in by_loop and len(ls) < max_loops:
+                        ls.append(by_loop[key])
+                    elif key in by_dec and len(ds) < max_decisions:
+                        ds.append(by_dec[key])
+        except Exception:
+            pass
     if ds:
         lines.append("Decisions (settled — cite the id):")
         for d in ds:
