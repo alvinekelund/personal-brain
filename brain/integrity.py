@@ -97,9 +97,11 @@ def check(conn, user: str = "") -> Report:
         ps = parents[nid]
         names = [nodes[p]["name"] for p in ps]
         if n["type"] == "category":
+            # a category hangs off the person or off another category (a
+            # sub-category made by `subgroup_categories`); never off a plain node
             if not ps:
                 r.unrooted_categories.append(n["name"])
-            elif ident_id and (len(ps) > 1 or ps[0] != ident_id):
+            elif ident_id and (len(ps) > 1 or (ps[0] != ident_id and nodes[ps[0]]["type"] != "category")):
                 r.category_bad_parent.append((n["name"], names))
         else:
             if not ps:
@@ -218,12 +220,14 @@ def repair(conn, user: str) -> dict:
         return [e for e in db.edges_for_node(conn, nid) if e["source_id"] == nid and e["relation"] == "part_of"]
 
     nodes = {n["id"]: n for n in db.all_nodes(conn)}
-    # 1. categories → only the person
+    # 1. categories → the person, or one parent category (a sub-category)
     for nid, n in nodes.items():
         if n["type"] != "category" or nid == ident:
             continue
         edges = part_of_edges(nid)
-        if len(edges) != 1 or edges[0]["target_id"] != ident:
+        ok = (len(edges) == 1 and (edges[0]["target_id"] == ident
+                                   or nodes.get(edges[0]["target_id"], {"type": ""})["type"] == "category"))
+        if not ok:
             for e in edges:
                 db.delete_edge(conn, e["id"])
             db.add_edge(conn, nid, ident, "part_of")

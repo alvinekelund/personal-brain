@@ -28,7 +28,7 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 
 **Action layer** — `LOOPS.md` (one loop per line in a strict grammar: id, title, due, owner alvin/claude/waiting:<who>, area, prio, next action) and `DECISIONS.md` (append-only: decision, why, rejected, revisit-if). Both are written only by `brain loop` / `brain decide`; `lint` fails on hand edits and a git pre-commit hook rejects removals from the decision ledger. NOW.md's "hot" section is rendered from the loops. `brain today` turns them into a deterministic action card (countdowns, aging waits, Claude-owned loops, top 3 next actions) and `brain doctor` checks the whole wiring — binary, DB, key, vault freshness, hooks, MCP registration, scheduled tasks — so a broken brain announces itself at session start instead of failing silently.
 
-**Tree integrity** — the person-rooted hierarchy is checked on every `brain doctor`: orphans, nodes with more than one `part_of` parent, categories not hanging off the person, cycles, edges left behind by a deleted node, legacy task nodes, near-duplicate names (including a bare first name vs a full name, and two same-type nodes that `brain index` maps to one vault file), and nodes without embeddings. `brain repair` fixes the structural ones deterministically and never deletes a node. Ingest and reorganize keep the invariant at write time: a planned parent replaces the old one; `brain merge` keeps one parent (the other becomes a cross-link) and `brain move` re-homes a node under the same rules.
+**Tree integrity** — the person-rooted hierarchy is checked on every `brain doctor`: orphans, nodes with more than one `part_of` parent, categories not hanging off the person or a parent category, cycles, edges left behind by a deleted node, legacy task nodes, near-duplicate names (including a bare first name vs a full name, and two same-type nodes that `brain index` maps to one vault file), and nodes without embeddings. `brain repair` fixes the structural ones deterministically and never deletes a node. Ingest and reorganize keep the invariant at write time: a planned parent replaces the old one; `brain merge` keeps one parent (the other becomes a cross-link) and `brain move` re-homes a node under the same rules.
 
 **Ambient capture that resists replay** — the SessionEnd hook ignores turns older than 36 hours (a resumed old session is not today's truth), skips automation sessions (scheduled-task prompts), tells the distiller to keep only the latest state when a plan is superseded, and hashes every distilled fact into `~/.personal-brain/capture-seen.jsonl` so a fact re-stated in a later session is never ingested twice. Every run is logged; `brain doctor` reports the last one.
 
@@ -175,6 +175,7 @@ brain merge <id1> <id2>          # merge id2 into id1 (keeps one parent, takes t
 brain move <node> <parent>       # re-home a node (ids or exact names); no cycles, categories only under you
 brain rename <node> <new-name>   # rename in place (refuses a name another node carries — merge instead)
 brain retype <node> <type>       # change the type; the decay half-life follows (never into/out of category)
+brain subgroup [--threshold N]   # split oversized categories into LLM-clustered sub-categories
 
 # Backup / portability
 brain export backup.json         # dump the whole graph to JSON

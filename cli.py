@@ -892,6 +892,27 @@ def repair_cmd():
     _repair()
 
 
+@cli.command()
+@click.option("--threshold", default=extract.SUBGROUP_THRESHOLD, show_default=True,
+              help="a category with more direct (non-category) children than this is split")
+def subgroup(threshold):
+    """Split oversized categories into LLM-clustered sub-categories (a category
+    under a category), so a big area gets real MECE sub-structure instead of a
+    flat list. Only the oversized ones are touched; `brain doctor` stays green."""
+    from brain import llm
+    if not llm.have_key():
+        click.echo("No GEMINI_API_KEY — sub-grouping needs the model.", err=True)
+        sys.exit(1)
+    conn = db.connect()
+    before = {n["name"] for n in db.all_nodes(conn) if n["type"] == "category"}
+    moved = extract.subgroup_categories(conn, threshold=threshold)
+    after = {n["name"] for n in db.all_nodes(conn) if n["type"] == "category"}
+    vault.auto_render(conn, config.get_user())
+    new = sorted(after - before)
+    click.echo(f"Re-parented {moved} node(s) into {len(new)} new sub-categor{'y' if len(new) == 1 else 'ies'}"
+               + (": " + ", ".join(new) if new else "") + ". `brain tree` to review, `brain move` to adjust.")
+
+
 @cli.group()
 def now():
     """NOW.md — the generated 'what is going on' view (IDENTITY + loops + areas' ## Now + people + apps)."""

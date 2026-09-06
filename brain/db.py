@@ -468,8 +468,8 @@ def move_node(conn, node_id, parent_id, ident_id=None):
     if node_id == parent_id:
         return "a node cannot be its own parent"
     if ident_id:
-        if node["type"] == "category" and parent_id != ident_id:
-            return "a category can only hang directly off the person"
+        if node["type"] == "category" and parent_id != ident_id and parent["type"] != "category":
+            return "a category can only hang off the person or another category"
         if node["type"] != "category" and parent_id == ident_id:
             return "only categories hang directly off the person — pick a category"
     stack, seen = [node_id], set()

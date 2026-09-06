@@ -1010,8 +1010,10 @@ class MoveNodeTests(BrainTestCase):
         self.assertIn("not found", db.move_node(self.conn, self.flat, "nope"))
 
     def test_category_rules_only_with_the_identity(self):
-        self.assertIn("category", db.move_node(self.conn, self.home, self.knowledge, ident_id=self.me))
+        self.assertIn("category", db.move_node(self.conn, self.home, self.flat, ident_id=self.me))  # under a fact: no
         self.assertIn("categories", db.move_node(self.conn, self.flat, self.me, ident_id=self.me))
+        self.assertIsNone(db.move_node(self.conn, self.home, self.knowledge, ident_id=self.me))  # sub-category: fine
+        self.assertEqual(self._parents(self.home), [self.knowledge])
         self.assertIsNone(db.move_node(self.conn, self.home, self.me, ident_id=self.me))  # category → person is fine
         self.assertEqual(self._parents(self.home), [self.me])
 

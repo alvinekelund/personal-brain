@@ -46,6 +46,8 @@ class IntegrityTests(BrainTestCase):
         mcg = db.get_node_by_name(c, "Miracle Consulting Group")["id"]
         sea = db.add_node(c, "Miracle SEA", type_="organization"); db.add_edge(c, sea, mcg, "part_of")
         c.execute("UPDATE nodes SET path = ? WHERE id = ?", ("orgs/miracle-consulting-group.md", sea))
+        # a sub-category under a category is legitimate structure (subgroup_categories makes them)
+        sub = db.add_node(c, "Courses", type_="category"); db.add_edge(c, sub, edu, "part_of")
         # one course captured under two types — the per-type ratio check never compares them
         for name, type_ in (("AC 215", "concept"), ("AC215", "event")):
             nid = db.add_node(c, name, type_=type_); db.add_edge(c, nid, edu, "part_of")
@@ -57,7 +59,7 @@ class IntegrityTests(BrainTestCase):
         self.assertIn("Boston", r.orphans)
         self.assertEqual(sorted(n for n, _ in r.multi_parent), ["DS Program", "Data Science"])
         self.assertIn("Hobbies", r.unrooted_categories)
-        self.assertEqual([n for n, _ in r.category_bad_parent], ["Life Events"])
+        self.assertEqual([n for n, _ in r.category_bad_parent], ["Life Events"])   # "Courses" under Education is fine
         self.assertEqual(r.under_identity, ["Resume"])
         self.assertEqual(len(r.cycles), 1)
         self.assertEqual(set(r.cycles[0]), {"Triathlon Training", "Triathlon"})
