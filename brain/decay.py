@@ -113,6 +113,9 @@ def run_decay(conn) -> dict:
         if n["archived"]:
             days_archived = (now - n["last_accessed"]) / 86400.0
             if days_archived > 7:
+                # the schema has no ON DELETE CASCADE: take the edges too, or
+                # they dangle (three such ghosts were found on Sep 6 2026)
+                conn.execute("DELETE FROM edges WHERE source_id = ? OR target_id = ?", (n["id"], n["id"]))
                 conn.execute("DELETE FROM nodes WHERE id = ?", (n["id"],))
                 deleted += 1
             continue

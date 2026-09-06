@@ -165,6 +165,20 @@ class DecayTests(BrainTestCase):
         kept = db.get_node(self.conn, employer)
         self.assertEqual((kept["archived"], kept["weight"]), (0, 1.0))    # still immortal
 
+    def test_an_expired_archived_node_takes_its_edges_with_it(self):
+        """run_decay deleted week-old archived nodes with a bare DELETE — the same
+        dangling-edge source fixed in db.delete_node on Sep 6 2026."""
+        a = db.add_node(self.conn, "Old thing", type_="event", importance=0.1)
+        b = db.add_node(self.conn, "Keeper", type_="concept", importance=0.9)
+        db.add_edge(self.conn, a, b, "relates_to")
+        self.conn.execute("UPDATE nodes SET archived = 1, last_accessed = ? WHERE id = ?",
+                          (time.time() - 8 * DAY, a))
+        self.conn.commit()
+        stats = decay.run_decay(self.conn)
+        self.assertEqual(stats["deleted"], 1)
+        self.assertIsNone(db.get_node(self.conn, a))
+        self.assertEqual(db.edges_for_node(self.conn, b), [])                # nothing dangles
+
     def test_category_is_never_demoted(self):
         cat = db.add_node(self.conn, "Health", type_="category", importance=0.2)
         self.conn.commit()
@@ -408,11 +422,13 @@ class IngestTests(BrainTestCase):
 
     def test_vague_and_specific_names(self):
         for bad in ("New Project (Harvard)", "the meeting", "Unknown", "TBD", "Untitled",
-                    "a new task", "Misc", "Other", "Some document", "This course (fall)"):
+                    "a new task", "Misc", "Other", "Some document", "This course (fall)",
+                    "September 2026", "Fall 2026", "2026", "Q4 2026", "W36", "September 6 2026"):
             self.assertTrue(extract.is_vague_name(bad), bad)
         for good in ("New York area", "Meeting with Heli", "The Token Company", "GCP project ac215",
                      "Personal Dashboard Project", "Course preferences", "Job Search",
-                     "Alvin's Apartment", "Cross-Registration", "AC 215", ""):
+                     "Alvin's Apartment", "Cross-Registration", "AC 215", "",
+                     "Fall Course Deadline", "September 9 lecture", "Autumn 2026 order", "SM Data Science Start"):
             self.assertFalse(extract.is_vague_name(good), good)
 
     def test_a_course_typed_as_an_event_becomes_a_concept(self):
@@ -425,7 +441,7 @@ class IngestTests(BrainTestCase):
             {"name": "MIT 6.4212", "type": "event"},
             {"name": "STAT211", "type": "Event"},
             {"name": "MIT 6.4212 Petition Approval", "type": "event"},
-            {"name": "Fall 2026", "type": "event"},
+            {"name": "Fall Course Deadline", "type": "event"},
             {"name": "AY1653", "type": "event"},
         ], "edges": []})
         try:
@@ -437,7 +453,7 @@ class IngestTests(BrainTestCase):
         self.assertEqual(types["MIT 6.4212"], "concept")
         self.assertEqual(types["STAT211"], "concept")
         self.assertEqual(types["MIT 6.4212 Petition Approval"], "event")
-        self.assertEqual(types["Fall 2026"], "event")                # a season, not a course
+        self.assertEqual(types["Fall Course Deadline"], "event")     # a dated deadline, not a course
         self.assertEqual(types["AY1653"], "event")                   # a flight, not a course
 
     def test_extractor_sees_sub_categories_and_files_under_them(self):

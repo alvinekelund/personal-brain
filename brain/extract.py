@@ -30,11 +30,24 @@ _COURSE_NAME = re.compile(
 )
 
 
+# A bare time period is a date, not an entity: "September 2026" ("the month
+# Alvin contacted the consulate") and "Fall 2026" carried nothing of their own.
+_TIME_PERIOD = re.compile(
+    r"^(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"(?:\s+\d{1,2})?\s+\d{4}|(?:spring|summer|fall|autumn|winter)\s+\d{4}|\d{4}|q[1-4]\s+\d{4}|"
+    r"(?:week|w)\s?\d{1,2}(?:\s+\d{4})?)$",
+    re.IGNORECASE,
+)
+
+
 def is_vague_name(name) -> bool:
     """True for names like "New Project (Harvard)", "the meeting", "Unknown",
     "TBD" — a generic noun with at most determiners in front and an optional
-    parenthetical behind. "New York area" or "Meeting with Heli" are fine."""
-    return bool(_VAGUE_NAME.match((name or "").strip()))
+    parenthetical behind — and for bare time periods ("September 2026",
+    "Fall 2026"). "New York area", "Meeting with Heli", "Fall Course Deadline"
+    are fine."""
+    s = (name or "").strip()
+    return bool(_VAGUE_NAME.match(s) or _TIME_PERIOD.match(s))
 
 # Progress + wall-clock control for one ingest (L-061). `brain add` points
 # ON_STAGE at stderr so a scheduled task shows which stage a slow Gemini call is
