@@ -291,11 +291,27 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
         if len(neighbors) >= 12:
             break
 
-    graph_lines = [f"- {n['name']} ({n['type']}): {n['content'] or ''}" for n in seeds]
+    def describe(n) -> str:
+        # the tree is the brain's structure: say where a node is filed, so
+        # "what sits under Career?" is answered from the spine, not guessed
+        parent = next((e["target_id"] for e in db.edges_for_node(conn, n["id"])
+                       if e["source_id"] == n["id"] and e["relation"] == "part_of"), None)
+        p = db.get_node(conn, parent) if parent else None
+        where = f", under {p['name']}" if p else ""
+        line = f"- {n['name']} ({n['type']}{where}): {n['content'] or ''}"
+        if n["type"] == "category":  # a category is its members: list them, capped
+            kids = [db.get_node(conn, e["source_id"]) for e in db.edges_for_node(conn, n["id"])
+                    if e["target_id"] == n["id"] and e["relation"] == "part_of"]
+            names = sorted(k["name"] for k in kids if k and not k["archived"])
+            if names:
+                shown = ", ".join(names[:20]) + (f", … ({len(names)} in all)" if len(names) > 20 else "")
+                line += f" Contains: {shown}."
+        return line
+
+    graph_lines = [describe(n) for n in seeds]
     if neighbors:
         graph_lines.append("Related:")
-        graph_lines += [f"- {o['name']} ({o['type']}): {o['content'] or ''}"
-                        for o in list(neighbors.values())[:12]]
+        graph_lines += [describe(o) for o in list(neighbors.values())[:12]]
     lines = list(ledger_lines)
     if file_lines:
         lines += ["Files (the vault is the source of truth; cite a file by its path):"] + file_lines

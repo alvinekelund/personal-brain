@@ -474,6 +474,30 @@ class IngestTests(BrainTestCase):
         self.assertIn("Shivam Singhal", graph_part)
         self.assertIn("Harvard account (artifact)", plain)              # no preference without a who-question
 
+    def test_answer_prompt_says_where_each_node_is_filed(self):
+        """The web /ask listed top-level categories as Career's sub-categories:
+        the prompt's graph lines carried no hierarchy. Each node now says which
+        node it is filed under, so structure questions read the spine."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        career = db.add_node(self.conn, "Career", type_="category"); db.add_edge(self.conn, career, me, "part_of")
+        sub = db.add_node(self.conn, "Companies & Organizations", type_="category",
+                          content="Employers and firms."); db.add_edge(self.conn, sub, career, "part_of")
+        bain = db.add_node(self.conn, "Bain & Company", type_="organization",
+                           content="Applied Aug 31."); db.add_edge(self.conn, bain, sub, "part_of")
+        self.conn.commit()
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p", p), "ans")[1]
+        try:
+            graph.answer_question(self.conn, "Where is Bain & Company filed?", k=4, ledger_root=self.vault_tmp)
+        finally:
+            llm.generate = orig
+        p = captured["p"]
+        self.assertIn("Bain & Company (organization, under Companies & Organizations)", p)
+        self.assertIn("Companies & Organizations (category, under Career)", p)
+        self.assertIn("Contains: Bain & Company.", p)                   # a category lists its members
+
 
     def test_merge_reroots_detached_categories(self):
         """A category that lost its part_of edge to the person (decay, a bad
