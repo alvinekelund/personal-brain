@@ -607,6 +607,31 @@ class IngestTests(BrainTestCase):
         self.assertEqual(db.get_node(self.conn, pid)["name"], "Hobbies")     # the club's branch
         self.assertIsNone(db.get_node_by_name(self.conn, "Artifacts"))       # no type-named area minted
 
+    def test_multi_chunk_extraction_runs_in_parallel_and_keeps_document_order(self):
+        """Two chunks used to be two sequential model calls (160 s for a 6.5 KB
+        file); they run side by side now and merge in document order."""
+        import threading
+        text = ("Alpha paragraph. " * 150) + "\n\n" + ("Beta paragraph. " * 150)   # 5.1 KB, two paragraphs
+        self.assertEqual(len(extract._chunk_text(text)), 2)                        # split on the paragraph boundary
+        started, lock = [], threading.Lock()
+        gate = threading.Barrier(2, timeout=5)                # both calls must be in flight at once
+
+        def fake_generate(prompt, *a, **k):
+            which = "Alpha" if "Alpha paragraph" in prompt else "Beta"
+            with lock:
+                started.append(which)
+            gate.wait()                                       # deadlocks (times out) if sequential
+            return json.dumps({"nodes": [{"name": f"{which} thing", "type": "concept"}], "edges": []})
+
+        orig = llm.generate
+        llm.generate = fake_generate
+        try:
+            ex = extract.extract(text)
+        finally:
+            llm.generate = orig
+        self.assertEqual(sorted(started), ["Alpha", "Beta"])
+        self.assertEqual([n["name"] for n in ex["nodes"]], ["Alpha thing", "Beta thing"])   # document order
+
     def test_who_questions_seed_person_nodes_first(self):
         """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
         "Harvard ..." on the real brain, so no people reached the answer. On a

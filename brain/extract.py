@@ -242,10 +242,14 @@ def extract(text: str, source: str = "", existing_names: list[str] | None = None
     if len(chunks) == 1:
         return _extract_chunk(chunks[0], source, existing_names, user, categories)
 
+    # chunks are independent model calls: run them side by side (a 6.5 KB file
+    # took 160 s sequentially), merge in document order below
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(CHUNK_WORKERS, len(chunks))) as ex:
+        parts = list(ex.map(lambda ch: _extract_chunk(ch, source, existing_names, user, categories), chunks))
     merged: dict = {"nodes": [], "edges": [], "tasks": []}
     seen: set[str] = set()
-    for chunk in chunks:
-        part = _extract_chunk(chunk, source, existing_names, user, categories)
+    for part in parts:
         for n in part.get("nodes", []):
             key = (n.get("name") or "").strip().lower()
             if key and key not in seen:
@@ -853,6 +857,7 @@ def category_labels(conn) -> list[str]:
 
 
 HINT_LIMIT = 80
+CHUNK_WORKERS = 4   # parallel extraction calls for a multi-chunk input
 
 
 def relevant_existing(conn, raw: str, existing: list, limit: int = HINT_LIMIT) -> list:
