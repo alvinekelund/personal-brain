@@ -35,6 +35,12 @@ class IntegrityTests(BrainTestCase):
         db.add_node(c, "Heli", type_="person"); db.add_node(c, "Heli Korhonen", type_="person")
         ghost = db.add_node(c, "Ghost", type_="concept"); db.add_edge(c, ghost, edu, "part_of")
         c.execute("DELETE FROM nodes WHERE id = ?", (ghost,))                          # the old non-cascading delete → dangling edge
+        # two orgs the vault index maps to one file (title + alias) = one entity; the
+        # project on the same file is a different type and must not be paired
+        for name, type_ in (("Miracle Consulting Group", "organization"), ("Miracle Oy", "organization"),
+                            ("Miracle summer job", "project")):
+            nid = db.add_node(c, name, type_=type_); db.add_edge(c, nid, career, "part_of")
+            c.execute("UPDATE nodes SET path = ? WHERE id = ?", ("orgs/miracle-consulting-group.md", nid))
         c.commit()
 
     def test_check_reports_every_problem(self):
@@ -49,6 +55,8 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(set(r.cycles[0]), {"Triathlon Training", "Triathlon"})
         self.assertEqual(r.legacy_tasks, ["Legacy"])
         self.assertIn(("Heli", "Heli Korhonen"), r.duplicates)
+        self.assertIn(("Miracle Consulting Group", "Miracle Oy"), r.duplicates)   # same vault file, same type
+        self.assertFalse([p for p in r.duplicates if "Miracle summer job" in p])  # same file, other type: not a dupe
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())

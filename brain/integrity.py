@@ -144,6 +144,21 @@ def check(conn, user: str = "") -> Report:
                 subset = items[i]["type"] == "person" and (ta <= tb or tb <= ta)
                 if a == b or subset or difflib.SequenceMatcher(None, a, b).ratio() >= DUP_RATIO:
                     r.duplicates.append((normed[i][1], normed[j][1]))
+    # two nodes of one type that `brain index` maps to the same vault file are,
+    # by that file's own title + alias list, one entity — the name-ratio check
+    # above misses pairs like "Miracle" / "Miracle Oy" (0.82), the vault does not
+    by_file: dict[tuple, list[str]] = {}
+    for n in nodes.values():
+        path = n["path"] if "path" in n.keys() else None
+        if path and n["type"] != "category":
+            by_file.setdefault((path, n["type"]), []).append(n["name"])
+    seen_pairs = {frozenset(p) for p in r.duplicates}
+    for names in by_file.values():
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                if frozenset((names[i], names[j])) not in seen_pairs:
+                    r.duplicates.append((names[i], names[j]))
+                    seen_pairs.add(frozenset((names[i], names[j])))
     return r
 
 
