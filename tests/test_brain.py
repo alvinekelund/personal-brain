@@ -500,6 +500,38 @@ class IngestTests(BrainTestCase):
         self.assertIn("Max van de Kuilen", captured["p"])                   # reaches the extractor prompt
         self.assertNotIn("Filler 99", captured["p"])                        # the tail never did before either
 
+    def test_a_re_mentioned_node_absorbs_new_content(self):
+        """"Alvin is the Treasurer of the Aalto Triathlon Club" matched the
+        existing club node and the role was dropped (the node was only
+        touched). New content that adds something is appended and the
+        embedding cleared; a restatement or a fragment changes nothing."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        club = db.add_node(self.conn, "Aalto Triathlon Club", type_="organization",
+                           content="A triathlon club Alvin is a member of.")
+        db.set_embedding(self.conn, club, [0.1, 0.2])
+        self.conn.commit()
+
+        def ingest_with(content):
+            responses = iter([json.dumps({"nodes": [
+                {"name": "Aalto Triathlon Club", "type": "organization", "content": content,
+                 "parent": "Hobbies"}], "edges": []}), "{}"])
+            orig = llm.generate
+            llm.generate = lambda *a, **k: next(responses, "{}")
+            try:
+                extract.ingest(self.conn, "text", source="t", user="Alvin")
+            finally:
+                llm.generate = orig
+            return db.get_node(self.conn, club)
+
+        n = ingest_with("A triathlon club.")                                # fragment: ignored
+        self.assertEqual(n["content"], "A triathlon club Alvin is a member of.")
+        self.assertIsNotNone(n["embedding"])
+        n = ingest_with("A triathlon club in Espoo; Alvin is its Treasurer.")  # novel: absorbed
+        self.assertIn("Alvin is a member of", n["content"])
+        self.assertIn("Alvin is its Treasurer", n["content"])
+        self.assertIsNone(n["embedding"])                                   # refreshed by the embed stage
+        self.assertEqual(len(db.all_nodes(self.conn)), 3)                   # Alvin, Hobbies, the club: no duplicate
+
     def test_who_questions_seed_person_nodes_first(self):
         """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
         "Harvard ..." on the real brain, so no people reached the answer. On a

@@ -114,6 +114,10 @@ Rules:
 - never emit two nodes for the same underlying thing. A problem and the act of
   solving it are ONE node (keep the thing, e.g. "gradient explosion bug", and
   express the outcome via an edge or its content) — not "X" plus "fixing X".
+- when the text states a new attribute of an entity the graph already has (a
+  role, a status, a date, a number), re-emit that entity with the attribute in
+  its content ("Aalto Triathlon Club": "... Alvin is its Treasurer"); if the
+  attribute is durable, also emit it as a `fact` node with that entity as parent.
 
 Hierarchy — organise everything into a tree rooted at the person:
 - give every node a "parent": the broader node it belongs under.
@@ -425,6 +429,34 @@ def _embed_and_find_dupe(conn, db, name, content, type_):
     return (best_id if best >= SEMANTIC_DEDUP_THRESHOLD else None), vec
 
 
+CONTENT_MAX = 600
+
+
+def _novel(old: str, new: str) -> bool:
+    """Does `new` say something `old` does not (two or more meaningful tokens
+    it lacks), without being a mere fragment of it?"""
+    from brain import db
+    ot = set(db._TOKEN_RE.findall((old or "").lower())) - db._STOPWORDS
+    nt = set(db._TOKEN_RE.findall((new or "").lower())) - db._STOPWORDS
+    return len(nt - ot) >= 2 and len(new or "") >= 0.6 * len(old or "")
+
+
+def _absorb_content(conn, db, existing, new_content: str):
+    """A re-mentioned entity used to be touched and its freshly extracted
+    content thrown away — so "Alvin is the Treasurer of the Aalto Triathlon
+    Club" never reached the club's node. If the new content adds something,
+    append it (oldest sentences trimmed past CONTENT_MAX) and clear the
+    embedding so the embed stage refreshes it."""
+    new = (new_content or "").strip()
+    old = (existing["content"] or "").strip()
+    if not new or new.lower() == old.lower() or not _novel(old, new):
+        return
+    merged = (old.rstrip(". ") + ". " + new).strip(". ") + "." if old else new
+    while len(merged) > CONTENT_MAX and ". " in merged:
+        merged = merged.split(". ", 1)[1]  # drop the oldest sentence
+    conn.execute("UPDATE nodes SET content = ?, embedding = NULL WHERE id = ?", (merged, existing["id"]))
+
+
 def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
                   entity_links: dict | None = None, user: str = ""):
     """Write extracted nodes/edges into the DB, deduplicating by name, entity
@@ -498,6 +530,7 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
 
         if existing:
             db.touch_node(conn, existing["id"])
+            _absorb_content(conn, db, existing, n.get("content", ""))
             name_to_id[name] = existing["id"]
             name_to_id[canonical] = existing["id"]
             node_ids.append(existing["id"])
