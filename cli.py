@@ -296,7 +296,7 @@ def digest():
     if d["top"]:
         click.echo("Top of mind:")
         for t in d["top"]:
-            click.echo(f"  [{t['type']:8s}] {t['name']}  (imp {t['importance']})")
+            click.echo(f"  [{t['type']:8s}] {t['name']}  (imp {t['importance']} · w {t.get('weight', 1.0)})")
     if d["tasks"]:
         click.echo("Open loops (LOOPS.md):")
         for t in d["tasks"]:

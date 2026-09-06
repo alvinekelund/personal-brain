@@ -221,7 +221,8 @@ def _digest(conn, args):
     lines = []
     if d["top"]:
         lines.append("Top of mind:")
-        lines += [f"  [{t['type']}] {t['name']} (importance {t['importance']})" for t in d["top"]]
+        lines += [f"  [{t['type']}] {t['name']} (importance {t['importance']}, weight {t.get('weight', 1.0)})"
+                  for t in d["top"]]
     if d["tasks"]:
         lines.append("Open loops (LOOPS.md):")
         lines += [f"  - {t}" for t in d["tasks"]]

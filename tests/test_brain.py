@@ -1525,11 +1525,19 @@ class GraphTests(BrainTestCase):
         db.add_node(self.conn, "Master's Thesis", type_="project", importance=0.95)
         db.add_node(self.conn, "trivia", type_="concept", importance=0.1)
         db.add_node(self.conn, "legacy task node", type_="task", importance=0.3)
+        db.add_node(self.conn, "Active project", type_="project", importance=0.9)
+        old = db.add_node(self.conn, "Old ceremony", type_="event", importance=0.95)
+        self.conn.execute("UPDATE nodes SET weight = 0.5 WHERE id = ?", (old,))   # heavy, but fading
         self.conn.commit()
         loops.add(self.vault_tmp, "Email advisor", "2026-09-09", "alvin", "harvard", "send it",
                   today=__import__("datetime").date(2026, 9, 1), commit=False)
         d = graph.digest(self.conn, "Alvin")                        # default root = configured vault
-        self.assertEqual(d["top"][0]["name"], "Master's Thesis")   # highest importance first
+        # top of mind = importance × weight: current work outranks a fading heavy event
+        self.assertEqual([t["name"] for t in d["top"][:2]], ["Master's Thesis", "Active project"])
+        wide = [t["name"] for t in graph.digest(self.conn, "Alvin", top=20)["top"]]
+        self.assertLess(wide.index("Active project"), wide.index("Old ceremony"))
+        self.assertEqual(next(t for t in graph.digest(self.conn, "Alvin", top=20)["top"]
+                              if t["name"] == "Old ceremony")["weight"], 0.5)
         self.assertEqual(d["tasks"], ["Email advisor (due 2026-09-09, alvin) L-001"])  # from LOOPS.md …
         self.assertNotIn("legacy task node", " ".join(d["tasks"]))   # … never from graph task nodes
         self.assertNotIn("legacy task node", [f["name"] for f in d["fading"]])

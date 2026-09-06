@@ -152,7 +152,7 @@ def render(conn, user: str = "", dest=None) -> list[Path]:
     d = graph.digest(conn, user, loops_root=root)
     out = ["# Digest — state of the brain", GENERATED_NOTE, ""]
     if d["top"]:
-        out += ["## Top of mind"] + [f"- **{t['name']}** [{t['type']}] imp {t['importance']}"
+        out += ["## Top of mind"] + [f"- **{t['name']}** [{t['type']}] imp {t['importance']} · w {t.get('weight', 1.0)}"
                                      for t in d["top"]] + [""]
     if d["tasks"]:
         out += ["## Open loops (from LOOPS.md)"] + [f"- {t}" for t in d["tasks"]] + [""]

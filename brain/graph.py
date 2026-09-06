@@ -218,9 +218,12 @@ def digest(conn, user: str = "", top: int = 6, loops_root=None) -> dict:
     # legacy task nodes (pre-Sep-2026 graphs) are ignored everywhere: tasks are loops
     nodes = [n for n in db.all_nodes(conn)
              if n["type"] not in ("category", "task") and n["name"].lower() != (user or "").lower()]
-    top_nodes = sorted(nodes, key=lambda n: (-imp(n), -n["weight"]))[:top]
+    # top of mind = important AND current: importance × weight (weight decays
+    # with silence), so a heavy but fading event drops below today's work
+    top_nodes = sorted(nodes, key=lambda n: (-(imp(n) * n["weight"]), -imp(n), n["name"]))[:top]
     return {
-        "top": [{"name": n["name"], "type": n["type"], "importance": round(imp(n), 2)}
+        "top": [{"name": n["name"], "type": n["type"], "importance": round(imp(n), 2),
+                 "weight": round(n["weight"], 2)}
                 for n in top_nodes],
         "tasks": open_loops(loops_root),
         "fading": [f for f in decay.at_risk_nodes(conn) if f.get("type") != "task"],
