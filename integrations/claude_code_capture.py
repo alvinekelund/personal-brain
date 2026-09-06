@@ -55,7 +55,10 @@ Rules:
 - Write 1-6 short plain-prose sentences, each a standalone fact, using the user's name.
 - Name people, organisations, courses and projects specifically, as the messages do \
 ("the ac215 GCP project", "Heli Helskyaho", "AC 215"), never as "a new project", \
-"my boss" or "the course"; a fact whose subject cannot be named is not worth keeping.
+"my boss" or "the course"; a fact whose subject cannot be named is not worth keeping. \
+Where the messages make the canonical name obvious, use it ("the triathlon club at \
+aalto" → Aalto Triathlon Club, "the miracle thing" → Miracle Consulting Group); keep \
+the user's own wording, in quotes, only when the referent is genuinely unclear.
 - When a message states a new attribute of something already known (a role, a status, \
 a date), state it as that thing's attribute ("Alvin is the Treasurer of the Aalto \
 Triathlon Club"), not as a separate event.
