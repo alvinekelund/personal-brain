@@ -75,3 +75,15 @@ class LedgerEmbeddingTests(IndexTestCase):
         self.assertEqual(index.ledger_semantic(self.conn, [1.0, 0.0]), [])
         lines, sources = graph.ledger_context("repayments", self.root, conn=self.conn, query_vector=[1.0, 0.0])
         self.assertIn("L-001", sources)                                  # keyword hit still works
+
+    def test_status_reports_stale_ledger_lines(self):
+        s = index.status(self.conn, self.root)
+        self.assertEqual((s["ledger_total"], s["ledger_embedded"]), (2, 0))
+        self.assertEqual(s["ledger_stale"], ["D-001", "L-001"])          # never indexed: everything is stale
+        index.build(self.conn, self.root, embed=True)
+        s = index.status(self.conn, self.root)
+        self.assertEqual((s["ledger_stale"], s["ledger_embedded"]), ([], 2))
+        loops.edit(self.root, "L-001", next_="chase the nine, then close", commit=False)
+        self.assertEqual(index.status(self.conn, self.root)["ledger_stale"], ["L-001"])
+        (self.root / "DECISIONS.md").unlink()
+        self.assertEqual(index.status(self.conn, self.root)["ledger_stale"], ["D-001", "L-001"])  # vanished counts too

@@ -433,15 +433,18 @@ def index_cmd(no_embed, show_status):
         s = vindex.status(conn, root)
         changed = len(s["new"]) + len(s["stale"]) + len(s["removed"])
         click.echo(f"{s['indexed']} indexed / {s['on_disk']} on disk · {s['node_links']} node link(s) · "
-                   f"{s['embedded']} embedded · {changed} changed since last index")
-        for label, items in (("new", s["new"]), ("changed", s["stale"]), ("removed", s["removed"])):
+                   f"{s['embedded']} embedded · {changed} changed since last index · "
+                   f"ledger {s['ledger_embedded']}/{s['ledger_total']} embedded, {len(s['ledger_stale'])} stale")
+        for label, items in (("new", s["new"]), ("changed", s["stale"]), ("removed", s["removed"]),
+                             ("ledger stale", s["ledger_stale"])):
             for p in items[:20]:
                 click.echo(f"  {label}: {p}")
         return
     s = vindex.build(conn, root, embed=not no_embed)
     click.echo(f"Indexed {s['files']} vault file(s): {s['added']} added, {s['updated']} updated, "
                f"{s['removed']} removed, {s['unchanged']} unchanged · {s['links']} file link(s), "
-               f"{s['node_links']} node link(s), {s['embedded']} embedded")
+               f"{s['node_links']} node link(s), {s['embedded']} embedded · "
+               f"{s['ledger_embedded']} ledger line(s) embedded")
     if s["no_frontmatter"]:
         click.echo("  no front-matter: " + ", ".join(s["no_frontmatter"][:10]))
 

@@ -322,8 +322,16 @@ def status(conn, root: Path) -> dict:
     last = conn.execute("SELECT MAX(indexed_at) FROM vault_files").fetchone()[0]
     node_links = conn.execute("SELECT COUNT(*) FROM vault_file_nodes").fetchone()[0]
     embedded = sum(1 for r in rows.values() if r["embedding"])
+    # the ledgers: a loop edited since the last index is matched by its old text
+    stored = {r["key"]: r for r in conn.execute("SELECT key, sha, embedding FROM ledger_embeddings")}
+    records = ledger_records(root)
+    ledger_stale = sorted([r["key"] for r in records if stored.get(r["key"]) is None
+                           or stored[r["key"]]["sha"] != r["sha"]]
+                          + [k for k in stored if k not in {r["key"] for r in records}])
+    ledger_embedded = sum(1 for r in stored.values() if r["embedding"])
     return {"indexed": len(rows), "on_disk": len(on_disk), "new": new, "stale": stale,
-            "removed": removed, "node_links": node_links, "embedded": embedded, "last_indexed": last}
+            "removed": removed, "node_links": node_links, "embedded": embedded, "last_indexed": last,
+            "ledger_total": len(records), "ledger_stale": ledger_stale, "ledger_embedded": ledger_embedded}
 
 
 # ── the ledgers as retrieval targets ──────────────────────────────────────────

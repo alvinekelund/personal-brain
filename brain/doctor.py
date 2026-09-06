@@ -171,7 +171,13 @@ def check_index(db_path: Path = DB_PATH, root: Path | None = None) -> Check:
     changed = len(s["new"]) + len(s["stale"]) + len(s["removed"])
     if changed:
         return Check("vault-index", "warn", f"{changed} vault file(s) changed since the last index — run `brain index`")
-    return Check("vault-index", "ok", f"{s['indexed']} files · {s['node_links']} node links · {s['embedded']} embedded")
+    ledger_stale = s.get("ledger_stale") or []
+    if ledger_stale:
+        return Check("vault-index", "warn",
+                     f"{len(ledger_stale)} ledger line(s) changed since the last index ({', '.join(ledger_stale[:4])}"
+                     f"{'…' if len(ledger_stale) > 4 else ''}) — run `brain index`")
+    return Check("vault-index", "ok", f"{s['indexed']} files · {s['node_links']} node links · {s['embedded']} embedded"
+                 f" · {s.get('ledger_embedded', 0)}/{s.get('ledger_total', 0)} ledger lines")
 
 
 def check_key() -> Check:
