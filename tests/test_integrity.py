@@ -41,6 +41,9 @@ class IntegrityTests(BrainTestCase):
                             ("Miracle summer job", "project")):
             nid = db.add_node(c, name, type_=type_); db.add_edge(c, nid, career, "part_of")
             c.execute("UPDATE nodes SET path = ? WHERE id = ?", ("orgs/miracle-consulting-group.md", nid))
+        # one course captured under two types — the per-type ratio check never compares them
+        for name, type_ in (("AC 215", "concept"), ("AC215", "event")):
+            nid = db.add_node(c, name, type_=type_); db.add_edge(c, nid, edu, "part_of")
         c.commit()
 
     def test_check_reports_every_problem(self):
@@ -57,6 +60,7 @@ class IntegrityTests(BrainTestCase):
         self.assertIn(("Heli", "Heli Korhonen"), r.duplicates)
         self.assertIn(("Miracle Consulting Group", "Miracle Oy"), r.duplicates)   # same vault file, same type
         self.assertFalse([p for p in r.duplicates if "Miracle summer job" in p])  # same file, other type: not a dupe
+        self.assertIn(("AC 215", "AC215"), r.duplicates)                          # same name, two types
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())

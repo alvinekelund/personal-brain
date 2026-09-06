@@ -159,6 +159,21 @@ def check(conn, user: str = "") -> Report:
                 if frozenset((names[i], names[j])) not in seen_pairs:
                     r.duplicates.append((names[i], names[j]))
                     seen_pairs.add(frozenset((names[i], names[j])))
+    # the same name captured under two types ("AC 215" concept vs "AC215" event)
+    # is one entity twice; the per-type pass never compares them, so match on the
+    # space-free normalised name across all non-category nodes
+    by_compact: dict[str, list[str]] = {}
+    for n in nodes.values():
+        if n["type"] != "category":
+            key = _norm(n["name"]).replace(" ", "")
+            if key:
+                by_compact.setdefault(key, []).append(n["name"])
+    for names in by_compact.values():
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                if frozenset((names[i], names[j])) not in seen_pairs:
+                    r.duplicates.append((names[i], names[j]))
+                    seen_pairs.add(frozenset((names[i], names[j])))
     return r
 
 
