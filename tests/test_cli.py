@@ -4,19 +4,25 @@ through click's runner against a temp brain (no key, no network). Five commands
 manual --help check each; a registration error would surface in a terminal, not
 in CI."""
 import sys
+import unittest
 from pathlib import Path
-
-from click.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+try:
+    from click.testing import CliRunner
+    import cli as brain_cli
+    HAVE_CLICK = True
+except ImportError:  # a bare interpreter without the package installed
+    HAVE_CLICK = False
+
 import brain.config as config
 import brain.db as db
-import cli as brain_cli
 
 from test_brain import BrainTestCase
 
 
+@unittest.skipUnless(HAVE_CLICK, "click (and the CLI) not installed — `pip install -e .`")
 class CliTests(BrainTestCase):
     def setUp(self):
         super().setUp()
