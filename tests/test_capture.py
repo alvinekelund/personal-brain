@@ -73,6 +73,20 @@ class CaptureTestCase(unittest.TestCase):
         return capture.LOG_PATH.read_text() if capture.LOG_PATH.exists() else ""
 
 
+class DistillPromptTests(unittest.TestCase):
+    def test_prompt_demands_specific_names_and_attributes(self):
+        """A distilled fact saying "a new project" became the graph node
+        "New Project (Harvard)" on Sep 6 2026; the extractor now refuses such
+        names, but the distiller must produce nameable facts in the first place."""
+        p = capture.DISTILL_PROMPT
+        for phrase in ("Name people, organisations, courses and projects specifically",
+                       "a new project", "cannot be named is not worth keeping",
+                       "new attribute of something already known", "NEVER include secrets"):
+            self.assertIn(phrase, p)
+        self.assertIn("{user}", p)
+        self.assertIn("{messages}", p)
+
+
 class TranscriptParsingTests(CaptureTestCase):
     def test_collects_only_human_typed_text(self):
         t = transcript(self._tmp, [
