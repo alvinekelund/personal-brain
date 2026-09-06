@@ -1,5 +1,27 @@
 import json
+import time
 from brain import llm
+
+# Progress + wall-clock control for one ingest (L-061). `brain add` points
+# ON_STAGE at stderr so a scheduled task shows which stage a slow Gemini call is
+# stuck in; the MCP server, ambient capture and the web view leave it None.
+# Past INGEST_DEADLINE seconds the best-effort stages (entity-linking,
+# embeddings) are skipped — the fact still lands in the graph, and
+# `brain reindex` backfills embeddings later. Override with BRAIN_INGEST_DEADLINE.
+ON_STAGE = None
+INGEST_DEADLINE = 240.0
+
+
+def _stage(msg: str, t0: float | None = None):
+    """Report an ingest stage to the ON_STAGE hook, stamped with elapsed time."""
+    if ON_STAGE is None:
+        return
+    if t0 is not None:
+        msg = f"{msg}  [t+{time.monotonic() - t0:.0f}s]"
+    try:
+        ON_STAGE(msg)
+    except Exception:
+        pass
 
 SYSTEM = """You extract structured knowledge from text.
 Return ONLY valid JSON with this exact shape:
@@ -458,12 +480,14 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
     return node_ids, edge_ids
 
 
-def embed_nodes(conn, node_ids, workers: int = 8) -> int:
+def embed_nodes(conn, node_ids, workers: int = 8, deadline: float | None = None) -> int:
     """Best-effort: compute & store embeddings for nodes that lack one, embedding
     in parallel (network-bound) for speed. DB writes stay on the calling thread.
 
     Embeddings are an optimization, not required for ingestion, so per-node
-    failures are swallowed. Returns the count embedded.
+    failures are swallowed. `deadline` (a time.monotonic() value) shrinks each
+    call's budget to the time left and skips calls once it has passed.
+    Returns the count embedded.
     """
     from concurrent.futures import ThreadPoolExecutor
     from brain import db
@@ -480,8 +504,14 @@ def embed_nodes(conn, node_ids, workers: int = 8) -> int:
 
     def fetch(item):
         nid, text = item
+        budget = None
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return nid, None
+            budget = max(5.0, min(llm.EMBED_BUDGET, left))
         try:
-            return nid, llm.embed(text)
+            return nid, llm.embed(text, budget=budget)
         except Exception:
             return nid, None
 
@@ -653,25 +683,58 @@ def commit_vault_writes(source: str = "", inbox_root=None) -> bool:
         return False
 
 
-def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None):
+def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
+           deadline_s: float | None = None):
     """Full ingestion pipeline shared by `brain add`, the MCP server, ambient
     capture and the web view: ensure identity → extract → divert tasks to the
     loop inbox → entity-link → merge (with hierarchy) → embed → refresh the
     markdown vault → commit the vault writes. Returns (node_ids, edge_ids).
     `inbox_root=False` disables task routing and the commit (tests); None means
-    the configured vault."""
+    the configured vault. `deadline_s` (default BRAIN_INGEST_DEADLINE /
+    INGEST_DEADLINE) is the wall-clock point after which the best-effort stages
+    are skipped rather than started."""
     from brain import db, vault
+
+    t0 = time.monotonic()
+    if deadline_s is None:
+        deadline_s = llm._env_float("BRAIN_INGEST_DEADLINE", INGEST_DEADLINE)
+    deadline = t0 + deadline_s
+
+    def late() -> bool:
+        return time.monotonic() > deadline
 
     if user:
         db.ensure_identity_anchor(conn, user)
     existing = db.all_nodes(conn)
     categories = [n["name"] for n in existing if n["type"] == "category"]
+    _stage(f"extract: {len(raw)} chars, {len(existing)} existing node(s), "
+           f"{len(_chunk_text(raw))} chunk(s)", t0)
     ex = extract(raw, source=source, existing_names=[n["name"] for n in existing],
                  user=user, categories=categories)
+    _stage(f"extracted {len(ex.get('nodes', []))} node(s), {len(ex.get('edges', []))} edge(s), "
+           f"{len(ex.get('tasks', []) or [])} task(s)", t0)
     route_tasks(divert_tasks(ex), source=source, inbox_root=inbox_root)
-    links = link_entities(ex.get("nodes", []), existing)
+
+    if late():
+        _stage(f"entity-link: skipped, past the {deadline_s:.0f}s ingest deadline "
+               f"(name + semantic dedup still apply)", t0)
+        links = {}
+    else:
+        _stage("entity-link against the existing graph", t0)
+        links = link_entities(ex.get("nodes", []), existing)
+
+    _stage("merge into the graph (dedup + hierarchy)", t0)
     node_ids, edge_ids = merge_into_db(conn, ex, source, raw, entity_links=links, user=user)
-    embed_nodes(conn, node_ids)
+
+    if late():
+        _stage(f"embed: skipped, past the {deadline_s:.0f}s ingest deadline "
+               f"— `brain reindex` backfills", t0)
+    else:
+        _stage(f"embed {len(node_ids)} node(s)", t0)
+        embed_nodes(conn, node_ids, deadline=deadline)
+
+    _stage("render the vault + commit", t0)
     vault.auto_render(conn, user)  # keep the markdown file layer in step with the graph
     commit_vault_writes(source=source, inbox_root=inbox_root)
+    _stage(f"done: {len(node_ids)} node(s), {len(edge_ids)} edge(s)", t0)
     return node_ids, edge_ids

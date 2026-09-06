@@ -288,6 +288,65 @@ class IngestTests(BrainTestCase):
                    if e["source_id"] == piano["id"] and e["relation"] == "part_of"]
         self.assertTrue(parents)  # placed under a category, not floating
 
+    def test_ingest_past_deadline_skips_link_and_embed_but_keeps_the_fact(self):
+        """L-061: once the ingest deadline has passed, entity-linking and
+        embedding (best-effort stages) are skipped so a slow Gemini cannot stall
+        a scheduled task — the fact itself still lands in the graph."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        orig = llm.generate, extract.link_entities, extract.embed_nodes
+        calls, stages = [], []
+        llm.generate = lambda *a, **k: (
+            '{"nodes":[{"name":"Padel","type":"skill","parent":"Hobbies","importance":0.5}],"edges":[]}')
+        extract.link_entities = lambda *a, **k: calls.append("link") or {}
+        extract.embed_nodes = lambda *a, **k: calls.append("embed") or 0
+        extract.ON_STAGE = stages.append
+        try:
+            nids, _ = extract.ingest(self.conn, "I play padel", source="t", user="Alvin",
+                                     deadline_s=-1)
+        finally:
+            llm.generate, extract.link_entities, extract.embed_nodes = orig
+            extract.ON_STAGE = None
+        self.assertTrue(nids)
+        self.assertIsNotNone(db.get_node_by_name(self.conn, "Padel"))
+        self.assertEqual(calls, [])  # neither best-effort stage was started
+        skipped = [s for s in stages if "skipped" in s]
+        self.assertEqual(len(skipped), 2)
+        self.assertIn("brain reindex", " ".join(skipped))  # says how to backfill
+
+    def test_ingest_reports_each_stage_with_elapsed_time(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        responses = iter([
+            '{"nodes":[{"name":"Padel","type":"skill","parent":"Hobbies"}],"edges":[]}',
+            '{}',  # link_entities
+        ])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        stages = []
+        extract.ON_STAGE = stages.append
+        try:
+            extract.ingest(self.conn, "I play padel", source="t", user="Alvin")
+        finally:
+            llm.generate = orig
+            extract.ON_STAGE = None
+        joined = "\n".join(stages)
+        for word in ("extract:", "extracted 1 node(s)", "entity-link", "merge", "done:"):
+            self.assertIn(word, joined)
+        self.assertRegex(joined, r"embed \d+ node\(s\)")
+        self.assertNotIn("skipped", joined)  # well inside the default deadline
+        self.assertTrue(all("[t+" in s for s in stages))  # every line carries elapsed time
+
+    def test_ingest_stage_hook_errors_never_break_ingest(self):
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        responses = iter(['{"nodes":[],"edges":[]}', '{}'])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        extract.ON_STAGE = lambda m: (_ for _ in ()).throw(IOError("closed stderr"))
+        try:
+            extract.ingest(self.conn, "nothing new", source="t", user="Alvin")  # must not raise
+        finally:
+            llm.generate = orig
+            extract.ON_STAGE = None
+
 
     def test_merge_reroots_detached_categories(self):
         """A category that lost its part_of edge to the person (decay, a bad
@@ -1400,6 +1459,108 @@ class LLMRetryTests(unittest.TestCase):
         self.assertEqual(llm._retry_delay("{}", 1), llm.RATE_LIMIT_BACKOFF * 2)
         huge = '{"error": {"details": [{"@type": "x/RetryInfo", "retryDelay": "999s"}]}}'
         self.assertEqual(llm._retry_delay(huge, 0), llm.RATE_LIMIT_MAX_WAIT)
+
+    # ── wall-clock budget (L-061: a slow Gemini must not stall a scheduled task) ──
+
+    def _run_budget(self, fake_urlopen, budget, timeout=60):
+        import urllib.request as ur
+        orig_open, orig_backoff = ur.urlopen, llm.BACKOFF
+        ur.urlopen, llm.BACKOFF = fake_urlopen, 30  # a retry wait no small budget can afford
+        try:
+            return llm._request(object(), timeout=timeout, budget=budget)
+        finally:
+            ur.urlopen, llm.BACKOFF = orig_open, orig_backoff
+
+    def test_budget_caps_the_per_attempt_socket_timeout(self):
+        seen = []
+        def ok(req, timeout, **kw):
+            seen.append(timeout)
+            return self._FakeResp()
+        self.assertEqual(self._run_budget(ok, budget=5, timeout=60), {"ok": 1})
+        self.assertLessEqual(seen[0], 5)  # not the full 60s when only 5s are budgeted
+
+    def test_budget_refuses_a_retry_wait_it_cannot_afford(self):
+        calls, slept = {"n": 0}, []
+        def dropped(req, timeout, **kw):
+            calls["n"] += 1
+            raise ConnectionResetError("dropped")
+        orig_sleep = llm.time.sleep
+        llm.time.sleep = slept.append
+        try:
+            with self.assertRaises(llm.BudgetExceeded) as cm:
+                self._run_budget(dropped, budget=5)
+        finally:
+            llm.time.sleep = orig_sleep
+        self.assertEqual(calls["n"], 1)   # failed fast
+        self.assertEqual(slept, [])       # never took the 30s nap
+        self.assertIn("5s budget", str(cm.exception))
+
+    def test_429_wait_beyond_budget_fails_fast(self):
+        import urllib.error as ue
+        body = json.dumps({"error": {"details": [
+            {"@type": "x/RetryInfo", "retryDelay": "60s"}]}}).encode()
+        calls, slept = {"n": 0}, []
+        def limited(req, timeout, **kw):
+            calls["n"] += 1
+            raise ue.HTTPError("u", 429, "quota", {}, io.BytesIO(body))
+        orig_sleep = llm.time.sleep
+        llm.time.sleep = slept.append
+        try:
+            with self.assertRaises(llm.BudgetExceeded):
+                self._run_budget(limited, budget=10)
+        finally:
+            llm.time.sleep = orig_sleep
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(slept, [])  # a 60s quota wait does not fit a 10s budget
+
+    def test_no_budget_keeps_the_old_unbounded_retry(self):
+        calls = {"n": 0}
+        def flaky(req, timeout, **kw):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise ConnectionResetError("dropped")
+            return self._FakeResp()
+        self.assertEqual(self._run(flaky), {"ok": 1})  # _run passes no budget
+        self.assertEqual(calls["n"], 3)
+
+    def test_generate_and_embed_name_the_budget_knob(self):
+        orig_req, orig_key = llm._request, os.environ.get("GEMINI_API_KEY")
+        os.environ["GEMINI_API_KEY"] = "test-key"
+        llm._request = lambda *a, **k: (_ for _ in ()).throw(llm.BudgetExceeded("too slow"))
+        try:
+            with self.assertRaises(RuntimeError) as g:
+                llm.generate("hi")
+            with self.assertRaises(RuntimeError) as e:
+                llm.embed("hi")
+        finally:
+            llm._request = orig_req
+            if orig_key is None:
+                del os.environ["GEMINI_API_KEY"]
+            else:
+                os.environ["GEMINI_API_KEY"] = orig_key
+        self.assertIn("BRAIN_LLM_BUDGET", str(g.exception))
+        self.assertIn("too slow", str(g.exception))
+        self.assertIn("over budget", str(e.exception))
+
+    def test_generate_passes_its_budget_down(self):
+        orig_req, orig_key = llm._request, os.environ.get("GEMINI_API_KEY")
+        os.environ["GEMINI_API_KEY"] = "test-key"
+        seen = {}
+        def fake(req, timeout, budget=None):
+            seen["budget"] = budget
+            return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+        llm._request = fake
+        try:
+            self.assertEqual(llm.generate("hi", budget=7), "ok")
+            self.assertEqual(seen["budget"], 7)
+            llm.generate("hi")
+            self.assertEqual(seen["budget"], llm.GENERATE_BUDGET)  # default applies
+        finally:
+            llm._request = orig_req
+            if orig_key is None:
+                del os.environ["GEMINI_API_KEY"]
+            else:
+                os.environ["GEMINI_API_KEY"] = orig_key
 
 
 class ParseJsonTests(unittest.TestCase):
