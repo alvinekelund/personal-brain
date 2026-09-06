@@ -23,7 +23,10 @@ def export_brain(conn, lean: bool = False) -> dict:
             d.pop("embedding", None)
         nodes.append(d)
     edges = [dict(r) for r in conn.execute("SELECT * FROM edges").fetchall()]
-    return {"schema_version": SCHEMA_VERSION, "nodes": nodes, "edges": edges}
+    # the ingestion log is the audit trail (and what `brain doctor` reads for
+    # "last ingest"); small, so a backup carries it
+    log = [dict(r) for r in conn.execute("SELECT * FROM ingestion_log").fetchall()]
+    return {"schema_version": SCHEMA_VERSION, "nodes": nodes, "edges": edges, "ingestion_log": log}
 
 
 def export_to_file(conn, path, lean: bool = False) -> dict:
@@ -94,6 +97,19 @@ def import_brain(conn, data: dict) -> tuple:
         )
         existing_edges.add((src, tgt, rel))
         e_added += 1
+
+    existing_log = {r["id"] for r in conn.execute("SELECT id FROM ingestion_log")}
+    for row in data.get("ingestion_log", []):
+        rid = row.get("id")
+        if not rid or rid in existing_log:
+            continue
+        conn.execute(
+            "INSERT INTO ingestion_log (id, raw_text, source, ingested_at, nodes_added, edges_added)"
+            " VALUES (?,?,?,?,?,?)",
+            (rid, row.get("raw_text", ""), row.get("source", ""), row.get("ingested_at", db.now()),
+             row.get("nodes_added", "[]"), row.get("edges_added", "[]")),
+        )
+        existing_log.add(rid)
 
     conn.commit()
     return n_added, e_added

@@ -1898,12 +1898,19 @@ class PortabilityTests(BrainTestCase):
         self.assertNotIn("path", node)                                      # recomputed by brain index
         lean = portability.export_brain(self.conn, lean=True)
         self.assertNotIn("embedding", next(x for x in lean["nodes"] if x["name"] == "Anna Houstecka"))
+        db.log_ingestion(self.conn, "Anna is my girlfriend.", "test", [a], [])
+        self.conn.commit()
+        full = portability.export_brain(self.conn)
+        self.assertEqual(len(full["ingestion_log"]), 1)
         dest = self._fresh_conn()
         portability.import_brain(dest, full)
         r = db.get_node(dest, a)
         self.assertEqual(r["importance"], 1.0)
         self.assertEqual(r["last_decayed"], 123456.0)
         self.assertEqual(json.loads(r["embedding"]), [0.5, 0.25])
+        self.assertEqual(dest.execute("SELECT COUNT(*) FROM ingestion_log").fetchone()[0], 1)  # audit trail restored
+        portability.import_brain(dest, full)                                                    # idempotent
+        self.assertEqual(dest.execute("SELECT COUNT(*) FROM ingestion_log").fetchone()[0], 1)
 
 
 class LLMRetryTests(unittest.TestCase):
