@@ -33,6 +33,7 @@ class Report:
     category_bad_parent: list[tuple[str, list[str]]] = field(default_factory=list)  # category whose parent isn't the person
     under_identity: list[str] = field(default_factory=list)       # non-category node hanging off the person
     cycles: list[list[str]] = field(default_factory=list)         # part_of cycles
+    dangling_edges: int = 0                                       # edges whose source/target node no longer exists
     missing_embeddings: int = 0
     duplicates: list[tuple[str, str]] = field(default_factory=list)  # suspiciously similar names, same type
     legacy_tasks: list[str] = field(default_factory=list)
@@ -40,7 +41,8 @@ class Report:
     @property
     def structural(self) -> int:
         return (len(self.orphans) + len(self.multi_parent) + len(self.unrooted_categories)
-                + len(self.category_bad_parent) + len(self.under_identity) + len(self.cycles))
+                + len(self.category_bad_parent) + len(self.under_identity) + len(self.cycles)
+                + self.dangling_edges)
 
     @property
     def clean(self) -> bool:
@@ -54,6 +56,7 @@ class Report:
         if self.category_bad_parent: bits.append(f"{len(self.category_bad_parent)} categor(ies) under a non-person")
         if self.under_identity: bits.append(f"{len(self.under_identity)} node(s) directly under the person")
         if self.cycles: bits.append(f"{len(self.cycles)} cycle(s)")
+        if self.dangling_edges: bits.append(f"{self.dangling_edges} dangling edge(s) to deleted nodes")
         if self.legacy_tasks: bits.append(f"{len(self.legacy_tasks)} legacy task node(s)")
         if self.duplicates: bits.append(f"{len(self.duplicates)} possible duplicate pair(s)")
         if self.missing_embeddings: bits.append(f"{self.missing_embeddings} node(s) without embeddings (brain reindex)")
@@ -71,8 +74,19 @@ def _parents(conn, nid: str) -> list[str]:
             if e["source_id"] == nid and e["relation"] == "part_of"]
 
 
+# shared by the SELECT in check() and the DELETE in repair(); no table alias —
+# SQLite's DELETE does not accept one
+_DANGLING_WHERE = (
+    "WHERE NOT EXISTS (SELECT 1 FROM nodes WHERE nodes.id = edges.source_id)"
+    " OR NOT EXISTS (SELECT 1 FROM nodes WHERE nodes.id = edges.target_id)"
+)
+
+
 def check(conn, user: str = "") -> Report:
     r = Report()
+    # edges left behind by a deleted node (the schema has no ON DELETE CASCADE):
+    # invisible to the tree walk below, which is exactly why they must be counted
+    r.dangling_edges = conn.execute(f"SELECT COUNT(*) FROM edges {_DANGLING_WHERE}").fetchone()[0]
     nodes = {n["id"]: n for n in db.all_nodes(conn)}
     ident = db.get_node_by_name(conn, user) if user else None
     ident_id = ident["id"] if ident else None
@@ -146,11 +160,15 @@ def repair(conn, user: str) -> dict:
     - categories: exactly one parent, the person;
     - node directly under the person: re-home under its type's fallback category;
     - orphan: attach to its type's fallback category (created and rooted if needed);
-    - cycle: cut the part_of edge leaving the node with the larger subtree.
+    - cycle: cut the part_of edge leaving the node with the larger subtree;
+    - dangling edge (its source or target node was deleted): removed.
     Never deletes or renames nodes; duplicates and embeddings are reported, not fixed."""
-    out = {"multi_parent": 0, "categories": 0, "under_identity": 0, "orphans": 0, "cycles": 0}
+    out = {"multi_parent": 0, "categories": 0, "under_identity": 0, "orphans": 0, "cycles": 0,
+           "dangling": 0}
     db.ensure_identity_anchor(conn, user)
     ident = db.get_node_by_name(conn, user)["id"]
+    # 0. edges to nodes that no longer exist
+    out["dangling"] = conn.execute(f"DELETE FROM edges {_DANGLING_WHERE}").rowcount
 
     def ensure_category(name: str) -> str:
         cat = db.get_node_by_name(conn, name)

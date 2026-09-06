@@ -301,6 +301,9 @@ def archive_node(conn, node_id):
 
 
 def delete_node(conn, node_id):
+    """Delete a node and every edge touching it — the schema has no ON DELETE
+    CASCADE, so without this a deleted node leaves dangling edges behind."""
+    conn.execute("DELETE FROM edges WHERE source_id = ? OR target_id = ?", (node_id, node_id))
     conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
 
 
@@ -413,15 +416,38 @@ def merge_nodes(conn, keep_id, drop_id) -> bool:
     """Merge drop_id into keep_id: re-point drop's edges onto keep, then delete
     drop (its leftover edges cascade away). Self-loops are skipped and add_edge
     dedups/reinforces, so merging never creates loops or duplicate edges.
+
+    The hierarchy stays a tree: when keep already has a `part_of` parent,
+    drop's parent is not carried over as a second one — it becomes a
+    `relates_to` cross-link instead (the graph keeps the connection, the spine
+    keeps one parent). If drop was keep's own parent, keep inherits drop's
+    parent. Nothing on the node itself is lost either: keep takes the higher
+    importance, and drop's content fills in only where keep has none.
     Returns False if either node is missing or the ids are the same.
     """
-    if keep_id == drop_id or not get_node(conn, keep_id) or not get_node(conn, drop_id):
+    keep, drop = get_node(conn, keep_id), get_node(conn, drop_id)
+    if keep_id == drop_id or not keep or not drop:
         return False
-    for edge in edges_for_node(conn, drop_id):
+    keep_parent = next((e["target_id"] for e in edges_for_node(conn, keep_id)
+                        if e["source_id"] == keep_id and e["relation"] == "part_of"), None)
+    if keep_parent == drop_id:
+        keep_parent = None  # drop was the parent: keep takes over drop's place
+    old_edges = edges_for_node(conn, drop_id)
+    for edge in old_edges:
         src = keep_id if edge["source_id"] == drop_id else edge["source_id"]
         tgt = keep_id if edge["target_id"] == drop_id else edge["target_id"]
-        if src != tgt:
-            add_edge(conn, src, tgt, edge["relation"], edge["weight"])
+        if src == tgt:
+            continue
+        relation = edge["relation"]
+        if relation == "part_of" and src == keep_id and keep_parent and tgt != keep_parent:
+            relation = "relates_to"  # a second parent would break the tree
+        add_edge(conn, src, tgt, relation, edge["weight"])
+    for edge in old_edges:  # nothing may keep pointing at the node about to vanish
+        delete_edge(conn, edge["id"])
+    importance = max(keep["importance"] or 0.0, drop["importance"] or 0.0)
+    content = keep["content"] or drop["content"] or ""
+    conn.execute("UPDATE nodes SET importance = ?, content = ? WHERE id = ?",
+                 (importance, content, keep_id))
     delete_node(conn, drop_id)
     touch_node(conn, keep_id)
     conn.commit()

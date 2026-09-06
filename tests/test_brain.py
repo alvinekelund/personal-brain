@@ -765,6 +765,87 @@ class MergeNodesTests(BrainTestCase):
         self.assertFalse(db.merge_nodes(self.conn, a, "nonexistent"))
         self.assertFalse(db.merge_nodes(self.conn, a, a))            # same id is a no-op
 
+    def _parents(self, nid):
+        return [e["target_id"] for e in db.edges_for_node(self.conn, nid)
+                if e["source_id"] == nid and e["relation"] == "part_of"]
+
+    def test_keeps_one_parent_and_turns_the_other_into_a_cross_link(self):
+        """Merging a duplicate that lived under a different category must not
+        give the survivor two part_of parents (the tree invariant); the old
+        parent becomes a relates_to cross-link instead."""
+        hobbies = db.add_node(self.conn, "Hobbies", type_="category")
+        education = db.add_node(self.conn, "Education", type_="category")
+        keep = db.add_node(self.conn, "Sundai Club", type_="organization")
+        drop = db.add_node(self.conn, "Sundai", type_="organization")
+        db.add_edge(self.conn, keep, hobbies, "part_of")
+        db.add_edge(self.conn, drop, education, "part_of")
+        self.conn.commit()
+        self.assertTrue(db.merge_nodes(self.conn, keep, drop))
+        self.assertEqual(self._parents(keep), [hobbies])             # still exactly one parent
+        cross = [(e["target_id"], e["relation"]) for e in db.edges_for_node(self.conn, keep)
+                 if e["source_id"] == keep and e["relation"] != "part_of"]
+        self.assertIn((education, "relates_to"), cross)             # connection kept as a cross-link
+
+    def test_children_of_the_dropped_node_are_reparented(self):
+        career = db.add_node(self.conn, "Career", type_="category")
+        keep = db.add_node(self.conn, "Miracle Consulting Group", type_="organization")
+        drop = db.add_node(self.conn, "Miracle Oy", type_="organization")
+        child = db.add_node(self.conn, "PCS demo work", type_="project")
+        db.add_edge(self.conn, keep, career, "part_of")
+        db.add_edge(self.conn, drop, career, "part_of")
+        db.add_edge(self.conn, child, drop, "part_of")
+        self.conn.commit()
+        db.merge_nodes(self.conn, keep, drop)
+        self.assertEqual(self._parents(child), [keep])               # child follows the survivor
+        self.assertEqual(self._parents(keep), [career])              # same parent: one edge, no cross-link
+
+    def test_survivor_inherits_the_parent_when_its_own_parent_is_merged_away(self):
+        career = db.add_node(self.conn, "Career", type_="category")
+        parent = db.add_node(self.conn, "Siemens", type_="organization")
+        keep = db.add_node(self.conn, "Siemens project", type_="project")
+        db.add_edge(self.conn, parent, career, "part_of")
+        db.add_edge(self.conn, keep, parent, "part_of")
+        self.conn.commit()
+        db.merge_nodes(self.conn, keep, parent)                      # fold the parent into its child
+        self.assertEqual(self._parents(keep), [career])              # not orphaned
+
+    def test_keeps_the_higher_importance_and_fills_missing_content(self):
+        keep = db.add_node(self.conn, "Miracle Consulting Group", type_="organization",
+                           content="", importance=0.4)
+        drop = db.add_node(self.conn, "Miracle Oy", type_="organization",
+                           content="Alvin's employer", importance=0.7)
+        self.conn.commit()
+        db.merge_nodes(self.conn, keep, drop)
+        n = db.get_node(self.conn, keep)
+        self.assertAlmostEqual(n["importance"], 0.7)
+        self.assertEqual(n["content"], "Alvin's employer")
+
+    def test_survivor_content_wins_when_present(self):
+        keep = db.add_node(self.conn, "A", type_="concept", content="keep me", importance=0.9)
+        drop = db.add_node(self.conn, "B", type_="concept", content="not me", importance=0.2)
+        self.conn.commit()
+        db.merge_nodes(self.conn, keep, drop)
+        n = db.get_node(self.conn, keep)
+        self.assertEqual(n["content"], "keep me")
+        self.assertAlmostEqual(n["importance"], 0.9)
+
+
+class DeleteNodeTests(BrainTestCase):
+    def test_delete_node_removes_its_edges_too(self):
+        """The schema has no ON DELETE CASCADE: the old delete left dangling
+        edges behind (three were found in the real graph on Sep 6 2026)."""
+        a = db.add_node(self.conn, "A", type_="concept")
+        b = db.add_node(self.conn, "B", type_="concept")
+        c = db.add_node(self.conn, "C", type_="concept")
+        db.add_edge(self.conn, a, b, "relates_to")
+        db.add_edge(self.conn, c, a, "part_of")
+        self.conn.commit()
+        db.delete_node(self.conn, a)
+        self.conn.commit()
+        self.assertIsNone(db.get_node(self.conn, a))
+        self.assertEqual(db.all_edges(self.conn), [])             # both edges went with it
+        self.assertEqual(db.edges_for_node(self.conn, c), [])
+
 
 class HierarchyTests(BrainTestCase):
     def _parents_of(self, node_id):

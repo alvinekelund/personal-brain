@@ -33,6 +33,8 @@ class IntegrityTests(BrainTestCase):
         db.add_node(c, "Legacy", type_="task")
         db.add_node(c, "Anna Houstecka", type_="person"); db.add_node(c, "Alvin's Girlfriend", type_="person")
         db.add_node(c, "Heli", type_="person"); db.add_node(c, "Heli Korhonen", type_="person")
+        ghost = db.add_node(c, "Ghost", type_="concept"); db.add_edge(c, ghost, edu, "part_of")
+        c.execute("DELETE FROM nodes WHERE id = ?", (ghost,))                          # the old non-cascading delete → dangling edge
         c.commit()
 
     def test_check_reports_every_problem(self):
@@ -48,12 +50,16 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r.legacy_tasks, ["Legacy"])
         self.assertIn(("Heli", "Heli Korhonen"), r.duplicates)
         self.assertGreater(r.missing_embeddings, 0)
+        self.assertEqual(r.dangling_edges, 1)
+        self.assertIn("1 dangling edge", r.summary())
         self.assertFalse(r.clean)
         self.assertIn("orphan", r.summary())
 
     def test_repair_makes_a_tree(self):
         self.build_broken()
         fixed = integrity.repair(self.conn, "Alvin")
+        self.assertEqual(fixed["dangling"], 1)         # the ghost's edge is gone
+        self.assertEqual(integrity.check(self.conn, "Alvin").dangling_edges, 0)
         self.assertEqual(fixed["orphans"], 6)          # Boston + the five parentless people/task nodes
         self.assertEqual(fixed["multi_parent"], 2)
         self.assertEqual(fixed["under_identity"], 1)
