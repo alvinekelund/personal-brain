@@ -147,18 +147,22 @@ def check(conn, user: str = "") -> Report:
     # two nodes of one type that `brain index` maps to the same vault file are,
     # by that file's own title + alias list, one entity — the name-ratio check
     # above misses pairs like "Miracle" / "Miracle Oy" (0.82), the vault does not
-    by_file: dict[tuple, list[str]] = {}
-    for n in nodes.values():
+    by_file: dict[tuple, list] = {}
+    for nid, n in nodes.items():
         path = n["path"] if "path" in n.keys() else None
         if path and n["type"] != "category":
-            by_file.setdefault((path, n["type"]), []).append(n["name"])
+            by_file.setdefault((path, n["type"]), []).append(nid)
     seen_pairs = {frozenset(p) for p in r.duplicates}
-    for names in by_file.values():
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                if frozenset((names[i], names[j])) not in seen_pairs:
-                    r.duplicates.append((names[i], names[j]))
-                    seen_pairs.add(frozenset((names[i], names[j])))
+    for ids in by_file.values():
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                a, b = ids[i], ids[j]
+                if a in parents.get(b, []) or b in parents.get(a, []):
+                    continue  # a parent and its child are two things, however the vault files them
+                pair = (nodes[a]["name"], nodes[b]["name"])
+                if frozenset(pair) not in seen_pairs:
+                    r.duplicates.append(pair)
+                    seen_pairs.add(frozenset(pair))
     # the same name captured under two types ("AC 215" concept vs "AC215" event)
     # is one entity twice; the per-type pass never compares them, so match on the
     # space-free normalised name across all non-category nodes
