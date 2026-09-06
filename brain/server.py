@@ -49,7 +49,9 @@ def api_context(conn, topic):
     nodes, fb = graph.collect_context_nodes(conn, topic=topic)
     if not nodes:
         return {"doc": "No relevant knowledge found.", "n": 0, "fallback": fb}
-    return {"doc": graph.synthesize_context(nodes, topic=topic), "n": len(nodes), "fallback": fb}
+    file_lines, ledger_lines = graph.context_material(conn, topic, nodes)
+    return {"doc": graph.synthesize_context(nodes, topic=topic, file_lines=file_lines, ledger_lines=ledger_lines),
+            "n": len(nodes), "fallback": fb}
 
 
 def api_node(conn, node_id):
