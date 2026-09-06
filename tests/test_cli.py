@@ -85,7 +85,7 @@ class CliTests(BrainTestCase):
             self.assertEqual(r.exit_code, 1, r.output)
             self.assertIn("GEMINI_API_KEY", r.output)
 
-    def test_merge_by_id(self):
+    def test_merge_by_id_or_name(self):
         dup = db.add_node(self.conn, "Padel duplicate", type_="event")
         db.add_edge(self.conn, dup, self.hobbies, "part_of")
         self.conn.commit()
@@ -93,3 +93,11 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertIsNone(db.get_node(self.conn, dup))
         self.assertEqual(self.parent_of("Padel"), "Knowledge")   # the survivor keeps its own parent
+        dup2 = db.add_node(self.conn, "Padel (dup)", type_="event")
+        self.conn.commit()
+        r = self.run_cli("merge", "Padel", "Padel (dup)")          # the doctor's hint pastes straight in
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIsNone(db.get_node(self.conn, dup2))
+        r = self.run_cli("merge", "Padel", "Padel")
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("same node", r.output)

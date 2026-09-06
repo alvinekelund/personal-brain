@@ -489,14 +489,21 @@ def synthesize():
 @click.argument("id1")
 @click.argument("id2")
 def merge(id1, id2):
-    """Merge two nodes (id2 into id1)."""
+    """Merge two nodes (the second into the first) — ids from `brain tree`, or exact names.
+
+    The survivor keeps one part_of parent (the other becomes a cross-link) and
+    the higher importance; the doctor's "A ~ B (brain merge)" hint pastes straight in."""
     conn = db.connect()
-    n1 = db.get_node(conn, id1)
-    n2 = db.get_node(conn, id2)
+    n1 = db.get_node(conn, id1) or db.get_node_by_name(conn, id1)
+    n2 = db.get_node(conn, id2) or db.get_node_by_name(conn, id2)
     if not n1 or not n2:
-        click.echo("One or both nodes not found.", err=True)
+        click.echo("One or both nodes not found — use ids from `brain tree` or the exact names.", err=True)
         sys.exit(1)
-    db.merge_nodes(conn, id1, id2)
+    if n1["id"] == n2["id"]:
+        click.echo("That is the same node twice.", err=True)
+        sys.exit(1)
+    db.merge_nodes(conn, n1["id"], n2["id"])
+    vault.auto_render(conn, config.get_user())
     click.echo(f"Merged {n2['name']} → {n1['name']}")
 
 
