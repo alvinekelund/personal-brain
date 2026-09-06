@@ -581,6 +581,32 @@ def retype(node, new_type):
     click.echo(f"Retyped {n['name']!r}: {n['type']} → {db.get_node(conn, n['id'])['type']}")
 
 
+@cli.command()
+@click.argument("node")
+@click.argument("content")
+def describe(node, content):
+    """Replace NODE's content with CONTENT (a correction; `brain add` appends on
+    re-mention, which leaves a stale sentence standing). Refreshes the embedding."""
+    from brain import llm
+    conn = db.connect()
+    n = db.get_node(conn, node) or db.get_node_by_name(conn, node)
+    if not n:
+        click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    err = db.set_content(conn, n["id"], content)
+    if err:
+        click.echo(f"Not changed: {err}", err=True)
+        sys.exit(1)
+    if llm.have_key():  # the embedding covers the content — refresh it, best-effort
+        try:
+            db.set_embedding(conn, n["id"], llm.embed(f"{n['name']}. {content.strip()}"))
+            conn.commit()
+        except Exception as e:
+            click.echo(f"  (embedding not refreshed: {e} — `brain reindex` later)", err=True)
+    vault.auto_render(conn, config.get_user())
+    click.echo(f"Described {n['name']!r} ({len(content.strip())} chars).")
+
+
 # ── forget ────────────────────────────────────────────────────────────────────
 
 @cli.command()

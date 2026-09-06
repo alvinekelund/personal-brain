@@ -1259,6 +1259,22 @@ class RetypeNodeTests(BrainTestCase):
         self.assertEqual((n["type"], n["half_life_days"]), ("skill", db.HALF_LIVES["skill"]))
 
 
+class DescribeNodeTests(BrainTestCase):
+    def test_replaces_content_and_clears_the_embedding(self):
+        a = db.add_node(self.conn, "personal-brain", type_="project",
+                        content="Stored at ~/CV-Projects/personal-brain.")
+        db.set_embedding(self.conn, a, [0.1, 0.2])
+        self.conn.commit()
+        self.assertIsNone(db.set_content(self.conn, a, "  Stored at ~/Projects/brain/personal-brain.  "))
+        n = db.get_node(self.conn, a)
+        self.assertEqual(n["content"], "Stored at ~/Projects/brain/personal-brain.")   # replaced, trimmed
+        self.assertNotIn("CV-Projects", n["content"])                                  # the stale claim is gone
+        self.assertIsNone(n["embedding"])                                              # refreshed later
+        self.assertIn("not found", db.set_content(self.conn, "nope", "x"))
+        self.assertIn("empty", db.set_content(self.conn, a, "   "))
+        self.assertEqual(db.get_node(self.conn, a)["content"], "Stored at ~/Projects/brain/personal-brain.")
+
+
 class HierarchyTests(BrainTestCase):
     def _parents_of(self, node_id):
         return {e["target_id"] for e in db.edges_for_node(self.conn, node_id)

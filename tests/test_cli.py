@@ -101,3 +101,11 @@ class CliTests(BrainTestCase):
         r = self.run_cli("merge", "Padel", "Padel")
         self.assertEqual(r.exit_code, 1)
         self.assertIn("same node", r.output)
+
+    def test_describe_replaces_content(self):
+        r = self.run_cli("describe", "Padel", "A racket sport Alvin plays on Tuesdays.")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(db.get_node_by_name(self.conn, "Padel")["content"], "A racket sport Alvin plays on Tuesdays.")
+        r = self.run_cli("describe", "Padel", "   ")
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("empty", r.output)

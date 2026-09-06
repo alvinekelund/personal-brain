@@ -540,6 +540,23 @@ def retype_node(conn, node_id, new_type) -> str | None:
     return None
 
 
+def set_content(conn, node_id, content) -> str | None:
+    """Replace a node's content in place — for a correction, where ingest's
+    append-on-re-mention would leave the stale sentence standing ("stored at
+    ~/CV-Projects/..." after the code moved). Clears the embedding so it is
+    refreshed. Refuses, returning the reason, for a missing node or empty text."""
+    content = (content or "").strip()
+    node = get_node(conn, node_id)
+    if not node:
+        return "node not found"
+    if not content:
+        return "the new content is empty"
+    conn.execute("UPDATE nodes SET content = ?, embedding = NULL WHERE id = ?", (content, node_id))
+    touch_node(conn, node_id)
+    conn.commit()
+    return None
+
+
 # ── Ingestion log ──────────────────────────────────────────────────────────
 
 def log_ingestion(conn, raw_text, source, node_ids, edge_ids):
