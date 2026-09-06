@@ -565,6 +565,32 @@ class IngestTests(BrainTestCase):
         self.assertEqual(parent_name("Treasurer of Aalto Triathlon Club"), "Aalto Triathlon Club")
         self.assertEqual(parent_name("Team kit"), "Artifacts")                # ambiguous → type fallback
 
+    def test_unplaced_node_joins_its_nearest_neighbours_branch(self):
+        """No parent from the model and no edge: instead of minting a
+        type-named top-level area ("Artifacts"), the node joins the branch of
+        the existing node it matches best."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        hobbies = db.add_node(self.conn, "Hobbies", type_="category"); db.add_edge(self.conn, hobbies, me, "part_of")
+        club = db.add_node(self.conn, "Aalto Triathlon Club", type_="organization",
+                           content="Triathlon club; Alvin ordered the team kit through it.")
+        db.add_edge(self.conn, club, hobbies, "part_of")
+        self.conn.commit()
+        responses = iter([json.dumps({"nodes": [
+            {"name": "Team kit", "type": "artifact", "content": "The triathlon club's team kit order."}],
+            "edges": []}), "{}"])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            extract.ingest(self.conn, "text", source="t", user="Alvin")
+        finally:
+            llm.generate = orig
+        kit = db.get_node_by_name(self.conn, "Team kit")
+        pid = next(e["target_id"] for e in db.edges_for_node(self.conn, kit["id"])
+                   if e["source_id"] == kit["id"] and e["relation"] == "part_of")
+        self.assertEqual(db.get_node(self.conn, pid)["name"], "Hobbies")     # the club's branch
+        self.assertIsNone(db.get_node_by_name(self.conn, "Artifacts"))       # no type-named area minted
+
     def test_who_questions_seed_person_nodes_first(self):
         """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
         "Harvard ..." on the real brain, so no people reached the answer. On a

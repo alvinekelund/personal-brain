@@ -299,6 +299,28 @@ def _edge_parent(conn, db, extracted: dict, node, name_to_id: dict, identity_id:
     return next(iter(cands)) if len(cands) == 1 else None
 
 
+def _neighbour_parent(conn, db, node, identity_id: str):
+    """For a node the extraction left unplaced, the branch of its closest
+    existing node (stem-aware keyword match on name + content): a matching
+    category directly, else the match's own parent — so "Team kit" joins the
+    triathlon club's branch instead of spawning a top-level "Artifacts" area.
+    None when nothing matches."""
+    try:
+        hits = db.search_nodes(conn, f"{node['name']} {node['content'] or ''}")
+    except Exception:
+        return None
+    for h in hits[:5]:
+        if h["id"] in (node["id"], identity_id):
+            continue
+        if h["type"] == "category":
+            return h["id"]
+        parent = next((e["target_id"] for e in db.edges_for_node(conn, h["id"])
+                       if e["source_id"] == h["id"] and e["relation"] == "part_of"), None)
+        if parent and parent not in (identity_id, node["id"]):
+            return parent
+    return None
+
+
 def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, user: str):
     """Build the hierarchy spine and enforce that it's a real tree:
 
@@ -370,6 +392,7 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
             # a fact about a club belongs under the club: prefer the one existing
             # node the extraction's own edges connect this node to, else the type's area
             cat_id = (_edge_parent(conn, db, extracted, node, name_to_id, identity["id"])
+                      or _neighbour_parent(conn, db, node, identity["id"])
                       or ensure_category(FALLBACK_CATEGORY.get(node["type"], "Misc")))
             if cat_id != nid:
                 new_edges.append(db.add_edge(conn, nid, cat_id, "part_of"))

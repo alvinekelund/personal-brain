@@ -121,8 +121,8 @@ def checks(conn):
     # 2. every category is a direct child of the person (categories root at identity)
     cat_ids = {n["id"] for n in db.all_nodes(conn) if n["type"] == "category"}
     cat_parents = {e["source_id"]: e["target_id"] for e in part_of if e["source_id"] in cat_ids}
-    check("every category is rooted directly at the person",
-          all(cat_parents.get(cid) == root["id"] for cid in cat_ids))
+    check("every category hangs off the person or a parent category",
+          all(cat_parents.get(cid) == root["id"] or cat_parents.get(cid) in cat_ids for cid in cat_ids))
 
     # 3. every non-category, non-identity node has a part_of parent (nothing floats)
     has_parent = {e["source_id"] for e in part_of}
