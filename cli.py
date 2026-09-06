@@ -74,7 +74,9 @@ def add(text, file_path, url, source):
     click.echo("Extracting knowledge...")
     # stage lines go to stderr so a scheduled task's log shows where a slow
     # Gemini call is stuck instead of a silent 10-minute wait (L-061)
+    from brain import llm
     extract.ON_STAGE = lambda msg: click.echo(f"  · {msg}", err=True)
+    llm.ON_WAIT = lambda msg: click.echo(f"  · {msg}", err=True)   # retry / rate-limit waits are visible too
     inbox_before = len(loops.inbox_list(vault.vault_dir()))
     try:
         node_ids, edge_ids = extract.ingest(conn, raw, source=source, user=user)
@@ -83,6 +85,7 @@ def add(text, file_path, url, source):
         sys.exit(1)
     finally:
         extract.ON_STAGE = None
+        llm.ON_WAIT = None
     routed = len(loops.inbox_list(vault.vault_dir())) - inbox_before
     if routed:
         click.echo(f"{routed} action item(s) routed to LOOPS-INBOX.md (not the graph) — triage with `brain loop inbox`")

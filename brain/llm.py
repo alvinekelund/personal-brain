@@ -31,6 +31,12 @@ class BudgetExceeded(OSError):
     """The call (attempts + waits) would outlive its wall-clock budget."""
 
 
+# Optional callable(str) told about every retry / rate-limit wait, so a stage
+# line can say "waiting 18s (rate limited)" instead of going silent — the
+# silence is what made the Sep 4 nightly sync look stuck (L-061).
+ON_WAIT = None
+
+
 def _env_float(name: str, default: float) -> float:
     try:
         return float(os.environ.get(name, default))
@@ -38,13 +44,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _sleep_within(seconds: float, deadline, budget, attempt: int):
+def _sleep_within(seconds: float, deadline, budget, attempt: int, why: str = "retry"):
     """Sleep before the next attempt — unless that wait alone would blow the
     budget, in which case give up now: sleeping would only delay the failure."""
     if deadline is not None and time.monotonic() + seconds > deadline:
         raise BudgetExceeded(
-            f"gave up after attempt {attempt + 1}/{RETRIES + 1}: a {seconds:.0f}s retry "
+            f"gave up after attempt {attempt + 1}/{RETRIES + 1}: a {seconds:.0f}s {why} "
             f"wait would exceed the {budget:.0f}s budget")
+    if ON_WAIT is not None:
+        try:
+            ON_WAIT(f"waiting {seconds:.0f}s ({why}, attempt {attempt + 1}/{RETRIES + 1})")
+        except Exception:
+            pass
     time.sleep(seconds)
 
 
@@ -97,17 +108,19 @@ def _request(req, timeout, budget=None):
             if e.code == 429 and attempt < RETRIES:
                 wait = _retry_delay(e.read().decode(errors="replace"), attempt)
                 try:
-                    _sleep_within(wait, deadline, budget, attempt)
+                    _sleep_within(wait, deadline, budget, attempt, why="rate limited")
                 except BudgetExceeded:
                     e.close()
                     raise
                 continue
             if e.code < 500 or attempt == RETRIES:
                 raise
-        except OSError:  # URLError, ConnectionError (incl. RemoteDisconnected), timeout
+            why = f"server error {e.code}"
+        except OSError as err:  # URLError, ConnectionError (incl. RemoteDisconnected), timeout
             if attempt == RETRIES:
                 raise
-        _sleep_within(BACKOFF * (attempt + 1), deadline, budget, attempt)
+            why = "timed out" if "timed out" in str(err).lower() else "connection dropped"
+        _sleep_within(BACKOFF * (attempt + 1), deadline, budget, attempt, why=why)
 
 
 def api_key() -> str:

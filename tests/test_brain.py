@@ -1963,8 +1963,14 @@ class LLMRetryTests(unittest.TestCase):
             if calls["n"] == 1:
                 raise ConnectionResetError("dropped")  # transient (OSError)
             return self._FakeResp()
-        self.assertEqual(self._run(flaky), {"ok": 1})
+        waits = []
+        llm.ON_WAIT = lambda m: (waits.append(m), (_ for _ in ()).throw(IOError("closed")))  # a broken hook must not break the call
+        try:
+            self.assertEqual(self._run(flaky), {"ok": 1})
+        finally:
+            llm.ON_WAIT = None
         self.assertEqual(calls["n"], 2)  # failed once, retried, succeeded
+        self.assertEqual(waits, ["waiting 0s (connection dropped, attempt 1/3)"])
 
     def test_4xx_fails_fast_without_retry(self):
         import urllib.error as ue
@@ -1990,12 +1996,16 @@ class LLMRetryTests(unittest.TestCase):
             return self._FakeResp()
         orig_sleep = llm.time.sleep
         llm.time.sleep = slept.append
+        waits = []
+        llm.ON_WAIT = waits.append
         try:
             self.assertEqual(self._run(rate_limited), {"ok": 1})
         finally:
             llm.time.sleep = orig_sleep
+            llm.ON_WAIT = None
         self.assertEqual(calls["n"], 2)
         self.assertEqual(slept, [18.0])  # honored the API's own retryDelay
+        self.assertEqual(waits, ["waiting 18s (rate limited, attempt 1/3)"])  # the wait is visible, not silent
 
     def test_429_exhausts_retries_then_raises(self):
         import urllib.error as ue
