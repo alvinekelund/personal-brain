@@ -531,18 +531,49 @@ def excerpt(root: Path, rel_path: str, query: str = "", max_chars: int = 1800) -
         body = text
     body = body.strip()
     q_tokens = tokens_of(query)
-    head = body[: max_chars // 2].rstrip()
     if not q_tokens or len(body) <= max_chars:
-        return body[:max_chars]
+        return _cut(body, max_chars)
+    head = _cut(body, max_chars // 2)   # the body is longer than the limit here, so the cut is marked
     picked, used = [], len(head)
-    for line in body[len(head):].splitlines():
+    for line in body[max_chars // 2:].splitlines():
         lt = tokens_of(line)
-        if lt and any(any(db._stem_eq(t, h) for h in lt) for t in q_tokens):
-            if used + len(line) + 1 > max_chars:
-                break
-            picked.append(line)
-            used += len(line) + 1
+        if not lt or not any(any(db._stem_eq(t, h) for h in lt) for t in q_tokens):
+            continue
+        room = max_chars - used - 1
+        if room < 80:
+            break
+        if len(line) > room:
+            # a long matching line (a day's log entry) used to be dropped whole:
+            # show a window around its first hit instead
+            line = _window(line, q_tokens, room)
+        picked.append(line)
+        used += len(line) + 1
     return head + ("\n…\n" + "\n".join(picked) if picked else "")
+
+
+def _cut(text: str, limit: int) -> str:
+    """Trim to `limit` at the last line or sentence boundary (never mid-word,
+    never mid-quote if avoidable) and mark the cut, so an answerer does not
+    mistake a truncated clause for a whole claim."""
+    if len(text) <= limit:
+        return text
+    cut = text[: max(limit - 2, 1)]  # room for the marker, so the result never exceeds `limit`
+    for sep in ("\n", ". ", "; ", ", ", " "):
+        i = cut.rfind(sep)
+        if i >= int(limit * 0.6):
+            cut = cut[: i + (1 if sep == ". " else 0)]
+            break
+    return cut.rstrip() + " …"
+
+
+def _window(line: str, q_tokens: set, room: int) -> str:
+    """The slice of `line` (≤ room chars) around the first query hit, marked."""
+    low = line.lower()
+    pos = min((low.find(t) for t in q_tokens if low.find(t) >= 0), default=0)
+    start = max(0, pos - room // 3)
+    end = min(len(line), start + room - 4)
+    start = max(0, end - (room - 4))
+    return ("…" if start > 0 else "") + line[start:end].strip() + ("…" if end < len(line) else "")
 
 
 def nodes_for_path(conn, rel_path: str) -> list:

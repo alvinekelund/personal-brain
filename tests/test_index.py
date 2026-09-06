@@ -290,6 +290,24 @@ class SearchTests(IndexTestCase):
         self.assertIn("Maxwell Dworkin 109 on Wednesdays", ex)
         self.assertEqual(index.excerpt(self.root, "docs/missing.md"), "")
 
+    def test_excerpt_windows_a_long_matching_line_and_marks_cuts(self):
+        """A day's log line is 500-900 chars; one that did not fit the budget was
+        dropped whole, and the opening was cut mid-sentence with no marker, so an
+        answer once relayed a truncated quote as a whole claim."""
+        head = "# Log\n" + "\n".join(f"- 07:{i:02d} filler entry number {i} about the morning scan" for i in range(30))
+        long_line = ("- 13:19 " + "context words that pad this entry out, " * 30
+                     + "the Protopapas late-arrival answer decides 6.S951, " + "more padding after the hit, " * 25)
+        w(self.root / "log/2026-09-06.md", head + "\n" + long_line + "\n- 14:00 tail entry\n")
+        ex = index.excerpt(self.root, "log/2026-09-06.md", "Protopapas", max_chars=900)
+        self.assertLessEqual(len(ex), 900)
+        self.assertIn("Protopapas late-arrival answer decides 6.S951", ex)   # windowed in, not dropped
+        self.assertGreaterEqual(ex.count("…"), 2)                             # the head cut and the window are marked
+        opening = ex.split("\n…\n")[0]
+        self.assertTrue(opening.endswith(" …"), opening[-40:])
+        self.assertTrue(opening[:-2].rstrip().endswith(("scan", ".", "Log")), opening[-60:])  # cut on a boundary
+        self.assertEqual(index._cut("short", 50), "short")
+        self.assertLessEqual(len(index._cut("word " * 100, 40)), 40)
+
 
 class AnswerTests(IndexTestCase):
     def test_answer_question_reads_the_files_first(self):
