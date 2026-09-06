@@ -468,6 +468,38 @@ class IngestTests(BrainTestCase):
         self.assertEqual(parents, [sub])                                        # filed under the sub-category
         self.assertIsNone(db.get_node_by_name(self.conn, "Career > Companies & Organizations"))
 
+    def test_extractor_is_shown_the_relevant_existing_nodes_not_the_oldest(self):
+        """all_nodes() is insertion-ordered, so the old hint (first 60 names)
+        showed the oldest nodes and hid the relevant recent ones — a duplicate
+        machine on a growing graph. The hint is now keyword matches, then the
+        most important nodes, capped."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        for i in range(100):
+            db.add_node(self.conn, f"Filler {i}", type_="fact", importance=0.1)
+        max_id = db.add_node(self.conn, "Max van de Kuilen", type_="person", importance=0.5,
+                             content="Red Sox ticket-block friend.")
+        block = db.add_node(self.conn, "Red Sox ticket block repayments", type_="concept", importance=0.6)
+        anna = db.add_node(self.conn, "Anna Houstecka", type_="person", importance=1.0)
+        self.conn.commit()
+        existing = db.all_nodes(self.conn)
+        hint = extract.relevant_existing(self.conn, "Max requested $70 for the Red Sox tickets", existing)
+        names = [n["name"] for n in hint]
+        self.assertLessEqual(len(names), extract.HINT_LIMIT)
+        self.assertIn("Max van de Kuilen", names[:5])                       # keyword match first
+        self.assertIn("Red Sox ticket block repayments", names[:5])
+        self.assertIn("Anna Houstecka", names)                              # most important fill the rest
+        self.assertLess(names.index("Anna Houstecka"), names.index("Filler 0"))
+        captured = {}
+        responses = iter(['{"nodes":[],"edges":[]}', "{}"])
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.setdefault("p", p), next(responses, "{}"))[1]
+        try:
+            extract.ingest(self.conn, "Max requested $70 for the Red Sox tickets", source="t", user="Alvin")
+        finally:
+            llm.generate = orig
+        self.assertIn("Max van de Kuilen", captured["p"])                   # reaches the extractor prompt
+        self.assertNotIn("Filler 99", captured["p"])                        # the tail never did before either
+
     def test_who_questions_seed_person_nodes_first(self):
         """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
         "Harvard ..." on the real brain, so no people reached the answer. On a

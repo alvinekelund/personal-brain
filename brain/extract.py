@@ -197,7 +197,7 @@ def _extract_chunk(text: str, source: str = "", existing_names: list[str] | None
         prompt += (
             f"\n\nExisting nodes already in the graph — reuse these exact names "
             f"if the text refers to the same entity:\n"
-            + ", ".join(existing_names[:60])
+            + ", ".join(existing_names[:HINT_LIMIT])
         )
 
     result = _parse_json(llm.generate(prompt, system=SYSTEM, response_json=True))
@@ -248,7 +248,7 @@ def link_entities(new_nodes: list, existing_nodes: list) -> dict:
         return {}
 
     new_names = [n["name"] for n in new_nodes]
-    existing_names = [n["name"] for n in existing_nodes[:60]]
+    existing_names = [n["name"] for n in existing_nodes[:HINT_LIMIT]]
 
     prompt = (
         f"New entities just extracted from text: {json.dumps(new_names)}\n"
@@ -758,6 +758,41 @@ def category_labels(conn) -> list[str]:
     return [name for _, name in sorted(labels)]
 
 
+HINT_LIMIT = 80
+
+
+def relevant_existing(conn, raw: str, existing: list, limit: int = HINT_LIMIT) -> list:
+    """The existing nodes worth showing the extractor and the entity-linker for
+    this text: keyword matches first, then semantic matches (with a key), then
+    the most important nodes — capped. all_nodes() is insertion-ordered, so the
+    old "first 60" hint showed the oldest nodes and hid the relevant ones,
+    which is how duplicates of recent nodes kept appearing."""
+    from brain import db
+    order: list = []
+    seen: set[str] = set()
+
+    def take(rows):
+        for r in rows:
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                order.append(r)
+
+    try:
+        take(db.search_nodes(conn, raw)[: limit // 2])
+    except Exception:
+        pass
+    if llm.have_key():
+        try:
+            from brain import graph as _graph
+            qvec = llm.embed(raw[:2000])
+            take([r for _, r in _graph.semantic_search(conn, qvec, limit=limit // 2)])
+        except Exception:
+            pass
+    by_importance = sorted(existing, key=lambda n: (-(n["importance"] or 0.0), -(n["weight"] or 0.0)))
+    take(by_importance)
+    return order[:limit]
+
+
 def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
            deadline_s: float | None = None):
     """Full ingestion pipeline shared by `brain add`, the MCP server, ambient
@@ -782,9 +817,10 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
         db.ensure_identity_anchor(conn, user)
     existing = db.all_nodes(conn)
     categories = category_labels(conn)
-    _stage(f"extract: {len(raw)} chars, {len(existing)} existing node(s), "
+    hint = relevant_existing(conn, raw, existing)
+    _stage(f"extract: {len(raw)} chars, {len(existing)} existing node(s) ({len(hint)} shown), "
            f"{len(_chunk_text(raw))} chunk(s)", t0)
-    ex = extract(raw, source=source, existing_names=[n["name"] for n in existing],
+    ex = extract(raw, source=source, existing_names=[n["name"] for n in hint],
                  user=user, categories=categories)
     _stage(f"extracted {len(ex.get('nodes', []))} node(s), {len(ex.get('edges', []))} edge(s), "
            f"{len(ex.get('tasks', []) or [])} task(s)", t0)
@@ -796,7 +832,7 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
         links = {}
     else:
         _stage("entity-link against the existing graph", t0)
-        links = link_entities(ex.get("nodes", []), existing)
+        links = link_entities(ex.get("nodes", []), hint)
 
     _stage("merge into the graph (dedup + hierarchy)", t0)
     node_ids, edge_ids = merge_into_db(conn, ex, source, raw, entity_links=links, user=user)
