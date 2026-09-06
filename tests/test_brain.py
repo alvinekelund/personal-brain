@@ -440,6 +440,34 @@ class IngestTests(BrainTestCase):
         self.assertEqual(types["Fall 2026"], "event")                # a season, not a course
         self.assertEqual(types["AY1653"], "event")                   # a flight, not a course
 
+    def test_extractor_sees_sub_categories_and_files_under_them(self):
+        """After `brain subgroup`, a sub-category must be offered to the model as
+        "Area > Sub-category" and an echoed label must resolve to the
+        sub-category itself — never become a new top-level category."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        career = db.add_node(self.conn, "Career", type_="category"); db.add_edge(self.conn, career, me, "part_of")
+        sub = db.add_node(self.conn, "Companies & Organizations", type_="category")
+        db.add_edge(self.conn, sub, career, "part_of")
+        self.conn.commit()
+        self.assertEqual(extract.category_labels(self.conn), ["Career", "Career > Companies & Organizations"])
+        captured = {}
+        responses = iter([json.dumps({"nodes": [
+            {"name": "Stripe", "type": "organization", "parent": "Career > Companies & Organizations"},
+        ], "edges": []}), "{}"])
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.setdefault("p", p), next(responses, "{}"))[1]
+        try:
+            extract.ingest(self.conn, "Stripe opened US intern postings.", source="t", user="Alvin")
+        finally:
+            llm.generate = orig
+        self.assertIn("Career > Companies & Organizations", captured["p"])   # offered hierarchically
+        stripe = db.get_node_by_name(self.conn, "Stripe")
+        parents = [e["target_id"] for e in db.edges_for_node(self.conn, stripe["id"])
+                   if e["source_id"] == stripe["id"] and e["relation"] == "part_of"]
+        self.assertEqual(parents, [sub])                                        # filed under the sub-category
+        self.assertIsNone(db.get_node_by_name(self.conn, "Career > Companies & Organizations"))
+
     def test_who_questions_seed_person_nodes_first(self):
         """"Who did Alvin meet at Harvard?" seeded only org/fact nodes named
         "Harvard ..." on the real brain, so no people reached the answer. On a

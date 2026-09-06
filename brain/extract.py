@@ -124,6 +124,11 @@ Hierarchy — organise everything into a tree rooted at the person:
 - a specific thing's parent is its category or a more specific node under one
   (parent of "Game on Sunday" is "Football"; parent of "Football" is "Hobbies").
 - REUSE existing categories when one genuinely fits; don't invent near-duplicates.
+- existing categories may be listed as "Area > Sub-category" (a sub-category under
+  an area). Prefer the most specific existing one that fits and give its bare name
+  as the parent ("Companies & Organizations", not "Career > Companies & Organizations").
+  Create a NEW category only for a genuinely new life-area, never for something that
+  fits an existing sub-category.
 - categories are DISTINCT, non-overlapping life-areas. Put each node in the single
   best-fitting one; if none fits well, create a more specific category rather than
   forcing it into a loosely-related one. Do NOT overload one category as a catch-all:
@@ -295,6 +300,8 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
     for n in extracted.get("nodes", []):
         child = (n.get("name") or "").strip()
         parent = (n.get("parent") or "").strip()
+        if " > " in parent:  # the model echoed an "Area > Sub-category" label: the sub-category is the parent
+            parent = parent.rsplit(" > ", 1)[-1].strip()
         if is_vague_name(parent):
             parent = ""  # never let "New Project" become a category; the fallback applies
         if not child or not parent or parent.lower() == child.lower():
@@ -734,6 +741,23 @@ def commit_vault_writes(source: str = "", inbox_root=None) -> bool:
         return False
 
 
+def category_labels(conn) -> list[str]:
+    """The existing categories as the extractor should see them: top-level areas
+    by name, sub-categories as "Area > Sub-category" (so the model can file a
+    node precisely and never re-creates a sub-category at the top level)."""
+    from brain import db
+    cats = {n["id"]: n for n in db.all_nodes(conn) if n["type"] == "category"}
+    labels = []
+    for cid, cat in cats.items():
+        parent = next((e["target_id"] for e in db.edges_for_node(conn, cid)
+                       if e["source_id"] == cid and e["relation"] == "part_of"), None)
+        if parent in cats:
+            labels.append((1, f"{cats[parent]['name']} > {cat['name']}"))
+        else:
+            labels.append((0, cat["name"]))
+    return [name for _, name in sorted(labels)]
+
+
 def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
            deadline_s: float | None = None):
     """Full ingestion pipeline shared by `brain add`, the MCP server, ambient
@@ -757,7 +781,7 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
     if user:
         db.ensure_identity_anchor(conn, user)
     existing = db.all_nodes(conn)
-    categories = [n["name"] for n in existing if n["type"] == "category"]
+    categories = category_labels(conn)
     _stage(f"extract: {len(raw)} chars, {len(existing)} existing node(s), "
            f"{len(_chunk_text(raw))} chunk(s)", t0)
     ex = extract(raw, source=source, existing_names=[n["name"] for n in existing],
