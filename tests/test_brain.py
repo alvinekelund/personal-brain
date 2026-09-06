@@ -889,6 +889,31 @@ class MoveNodeTests(BrainTestCase):
         self.assertEqual(self._parents(self.home), [self.me])
 
 
+class RenameNodeTests(BrainTestCase):
+    def test_renames_in_place_and_clears_the_file_link(self):
+        a = db.add_node(self.conn, "Google Cloud project", type_="project")
+        b = db.add_node(self.conn, "Other", type_="concept")
+        db.add_edge(self.conn, a, b, "relates_to")
+        self.conn.execute("UPDATE nodes SET path = ? WHERE id = ?", ("courses/ac-215.md", a))
+        self.conn.commit()
+        self.assertIsNone(db.rename_node(self.conn, a, "  GCP project ac215 "))
+        n = db.get_node(self.conn, a)
+        self.assertEqual(n["name"], "GCP project ac215")                 # trimmed
+        self.assertIsNone(n["path"])                                     # re-linked by the next brain index
+        self.assertEqual(len(db.edges_for_node(self.conn, a)), 1)        # edges untouched
+        self.assertIsNone(db.get_node_by_name(self.conn, "Google Cloud project"))
+
+    def test_refuses_empty_missing_and_collisions(self):
+        a = db.add_node(self.conn, "AC 215", type_="concept")
+        b = db.add_node(self.conn, "AC215", type_="event")
+        self.conn.commit()
+        self.assertIn("empty", db.rename_node(self.conn, a, "   "))
+        self.assertIn("not found", db.rename_node(self.conn, "nope", "x"))
+        self.assertIn("merge", db.rename_node(self.conn, b, "ac 215"))   # case-insensitive collision
+        self.assertIsNone(db.rename_node(self.conn, a, "Ac 215"))        # same node, case change only
+        self.assertEqual(db.get_node(self.conn, a)["name"], "Ac 215")
+
+
 class HierarchyTests(BrainTestCase):
     def _parents_of(self, node_id):
         return {e["target_id"] for e in db.edges_for_node(self.conn, node_id)

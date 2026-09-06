@@ -520,6 +520,33 @@ def move(node, parent):
     click.echo(f"Moved {n['name']} → under {p['name']}")
 
 
+@cli.command()
+@click.argument("node")
+@click.argument("new_name")
+def rename(node, new_name):
+    """Rename NODE (id or exact name) to NEW_NAME — id, edges and its place in the tree stay."""
+    from brain import llm
+    conn = db.connect()
+    n = db.get_node(conn, node) or db.get_node_by_name(conn, node)
+    if not n:
+        click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    old = n["name"]
+    err = db.rename_node(conn, n["id"], new_name)
+    if err:
+        click.echo(f"Not renamed: {err}", err=True)
+        sys.exit(1)
+    new_name = new_name.strip()
+    if llm.have_key():  # the embedding covers the name — refresh it, best-effort
+        try:
+            db.set_embedding(conn, n["id"], llm.embed(f"{new_name}. {n['content'] or ''}"))
+            conn.commit()
+        except Exception as e:
+            click.echo(f"  (embedding not refreshed: {e} — `brain reindex` later)", err=True)
+    vault.auto_render(conn, config.get_user())
+    click.echo(f"Renamed {old!r} → {new_name!r}  (run `brain index` to re-link it to a vault file)")
+
+
 # ── forget ────────────────────────────────────────────────────────────────────
 
 @cli.command()

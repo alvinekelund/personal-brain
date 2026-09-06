@@ -491,6 +491,27 @@ def move_node(conn, node_id, parent_id, ident_id=None):
     return None
 
 
+def rename_node(conn, node_id, new_name) -> str | None:
+    """Rename a node in place — id, edges, weight and place in the tree stay.
+    Refuses, returning the reason, when the node is missing, the name is empty,
+    or another node already carries that name (case-insensitive: merge those
+    instead). Clears `path` so the next `brain index` re-links the node to the
+    vault file whose title or alias now matches. Returns None on success."""
+    new_name = (new_name or "").strip()
+    node = get_node(conn, node_id)
+    if not node:
+        return "node not found"
+    if not new_name:
+        return "the new name is empty"
+    other = get_node_by_name(conn, new_name)
+    if other and other["id"] != node_id:
+        return f"another node is already called {other['name']!r} — `brain merge` them instead"
+    conn.execute("UPDATE nodes SET name = ?, path = NULL WHERE id = ?", (new_name, node_id))
+    touch_node(conn, node_id)
+    conn.commit()
+    return None
+
+
 # ── Ingestion log ──────────────────────────────────────────────────────────
 
 def log_ingestion(conn, raw_text, source, node_ids, edge_ids):
