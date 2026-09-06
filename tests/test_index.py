@@ -308,6 +308,21 @@ class SearchTests(IndexTestCase):
         self.assertEqual(index._cut("short", 50), "short")
         self.assertLessEqual(len(index._cut("word " * 100, 40)), 40)
 
+    def test_log_excerpt_leads_with_the_newest_matching_entries(self):
+        """A log's opening is its oldest entry (the 07:18 scan); a question about
+        the day was answered from it while the afternoon's entries were cut."""
+        entries = [f"- 07:{i:02d} morning filler entry {i} about the inbox scan and calendar" for i in range(40)]
+        entries += ["- 13:00 the graph was cleaned and the doctor sees dangling edges",
+                    "- 14:40 retry waits are visible; the graph answers structure questions from the spine"]
+        w(self.root / "log/2026-09-06.md", "\n".join(entries) + "\n")
+        ex = index.excerpt(self.root, "log/2026-09-06.md", "graph doctor", max_chars=600, matches_first=True)
+        self.assertLessEqual(len(ex), 600)
+        self.assertTrue(ex.startswith("- 14:40"), ex[:80])                  # newest matching entry first
+        self.assertIn("- 13:00 the graph was cleaned", ex)
+        self.assertLess(ex.index("- 14:40"), ex.index("- 13:00"))
+        default = index.excerpt(self.root, "log/2026-09-06.md", "graph doctor", max_chars=600)
+        self.assertTrue(default.startswith("- 07:00"))                        # other kinds keep opening first
+
 
 class AnswerTests(IndexTestCase):
     def test_answer_question_reads_the_files_first(self):

@@ -348,7 +348,8 @@ def file_context(conn, query: str, seeds: list, root=None, query_vector=None, n:
         return [], []
     lines = []
     for f in files:
-        ex = index.excerpt(root, f["path"], query)
+        # a log's opening is its oldest entry: lead with the matching lines, newest first
+        ex = index.excerpt(root, f["path"], query, matches_first=(f.get("kind") == "log"))
         if ex:
             lines += [f"### {f['path']} ({f['title']})", ex]
     return files, lines

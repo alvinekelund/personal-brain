@@ -517,9 +517,13 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
     return out
 
 
-def excerpt(root: Path, rel_path: str, query: str = "", max_chars: int = 1800) -> str:
+def excerpt(root: Path, rel_path: str, query: str = "", max_chars: int = 1800,
+            matches_first: bool = False) -> str:
     """The part of a file worth showing an answerer: its opening, then the lines
-    that mention query tokens. Read from disk — the vault is the source of truth."""
+    that mention query tokens. Read from disk — the vault is the source of truth.
+    `matches_first` (used for log files, where the opening is the oldest entry)
+    leads with the matching lines, newest first, and adds the opening only if
+    room remains."""
     p = Path(root) / rel_path
     try:
         text = p.read_text(encoding="utf-8", errors="replace")
@@ -533,12 +537,30 @@ def excerpt(root: Path, rel_path: str, query: str = "", max_chars: int = 1800) -
     q_tokens = tokens_of(query)
     if not q_tokens or len(body) <= max_chars:
         return _cut(body, max_chars)
+
+    def matching(lines):
+        for line in lines:
+            lt = tokens_of(line)
+            if lt and any(any(db._stem_eq(t, h) for h in lt) for t in q_tokens):
+                yield line
+
+    if matches_first:
+        picked, used = [], 0
+        for line in matching(reversed(body.splitlines())):
+            room = max_chars - used - 1
+            if room < 80:
+                break
+            if len(line) > room:
+                line = _window(line, q_tokens, room)
+            picked.append(line)
+            used += len(line) + 1
+        rest = max_chars - used - 2
+        head = _cut(body, rest) if rest >= 120 else ""
+        return "\n".join(picked) + (("\n…\n" + head) if head else "") if picked else _cut(body, max_chars)
+
     head = _cut(body, max_chars // 2)   # the body is longer than the limit here, so the cut is marked
     picked, used = [], len(head)
-    for line in body[max_chars // 2:].splitlines():
-        lt = tokens_of(line)
-        if not lt or not any(any(db._stem_eq(t, h) for h in lt) for t in q_tokens):
-            continue
+    for line in matching(body[max_chars // 2:].splitlines()):
         room = max_chars - used - 1
         if room < 80:
             break
