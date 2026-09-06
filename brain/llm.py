@@ -178,7 +178,7 @@ def generate(
     system: str = "",
     model: str = DEFAULT_MODEL,
     response_json: bool = False,
-    timeout: float = 60.0,
+    timeout: float | None = None,
     budget: float | None = None,
 ) -> str:
     """Call Gemini generateContent and return the response text.
@@ -186,9 +186,14 @@ def generate(
     response_json=True asks the model to emit raw JSON (responseMimeType),
     which removes the need to strip ``` fences for structured extraction.
     `budget` caps the whole call (retries + waits); default BRAIN_LLM_BUDGET.
+    `timeout` is one attempt's socket wait and defaults to the budget: a slow
+    but progressing generation (a dense 4 KB chunk can take 80 s) must not be
+    killed at 60 s and restarted from scratch — retries are for failures.
     """
     if budget is None:
         budget = _env_float("BRAIN_LLM_BUDGET", GENERATE_BUDGET)
+    if timeout is None:
+        timeout = budget
     body: dict = {"contents": [{"parts": [{"text": prompt}]}]}
     if system:
         body["system_instruction"] = {"parts": [{"text": system}]}

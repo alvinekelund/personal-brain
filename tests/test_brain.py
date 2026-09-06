@@ -2109,14 +2109,18 @@ class LLMRetryTests(unittest.TestCase):
         os.environ["GEMINI_API_KEY"] = "test-key"
         seen = {}
         def fake(req, timeout, budget=None):
-            seen["budget"] = budget
+            seen["budget"], seen["timeout"] = budget, timeout
             return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
         llm._request = fake
         try:
             self.assertEqual(llm.generate("hi", budget=7), "ok")
             self.assertEqual(seen["budget"], 7)
+            self.assertEqual(seen["timeout"], 7)                    # one attempt may use the whole budget
             llm.generate("hi")
             self.assertEqual(seen["budget"], llm.GENERATE_BUDGET)  # default applies
+            self.assertEqual(seen["timeout"], llm.GENERATE_BUDGET)  # a slow generation is not killed at 60 s
+            llm.generate("hi", timeout=5)
+            self.assertEqual(seen["timeout"], 5)                    # an explicit per-attempt cap still wins
         finally:
             llm._request = orig_req
             if orig_key is None:
