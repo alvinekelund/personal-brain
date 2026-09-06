@@ -113,7 +113,7 @@ brain show --type concept        # filter by type
 
 # Search
 brain query "attention"               # keyword / stem search
-brain reindex                         # embed all nodes (needed once for semantic)
+brain reindex                         # embed the nodes still lacking embeddings (--all to redo every node)
 brain query "machine learning" --semantic   # rank by meaning, not keywords
 brain index [--no-embed] [--status]   # index the vault directory: file paths, aliases, links, node paths (D-014)
 brain ask "where do I want to study?"        # Q&A — files first (paths cited), then ledgers and graph nodes
@@ -163,7 +163,7 @@ brain area touch harvard                         # stamp `updated:` on areas/har
 brain digest                     # at-a-glance: top of mind, open loops (from LOOPS.md), fading, by area
 brain status                     # stats + decay report + what's fading soon
 brain synthesize                 # find and surface new connections
-brain reindex                    # (re)compute embeddings for semantic search
+brain reindex [--all]            # embed nodes lacking embeddings (parallel); --all re-embeds everything
 brain decay                      # run decay manually
 brain prune                      # delete archived nodes
 brain clear                      # erase the entire brain (asks to confirm; -y to skip)

@@ -450,22 +450,27 @@ def index_cmd(no_embed, show_status):
 
 
 @cli.command()
-def reindex():
-    """Compute embeddings for all active nodes (enables `query --semantic`)."""
+@click.option("--all", "everything", is_flag=True,
+              help="re-embed every active node, not only the ones without an embedding")
+def reindex(everything):
+    """Embed the active nodes that lack an embedding (parallel; enables semantic
+    search and dedup). --all re-embeds everything, e.g. after a model change."""
     from brain import llm
+    if not llm.have_key():
+        click.echo("No GEMINI_API_KEY — embeddings need the model.", err=True)
+        sys.exit(1)
     conn = db.connect()
     nodes = db.all_nodes(conn)
-    done = 0
-    with click.progressbar(nodes, label="Embedding nodes") as bar:
-        for node in bar:
-            try:
-                vec = llm.embed(f"{node['name']}. {node['content'] or ''}")
-                db.set_embedding(conn, node["id"], vec)
-                done += 1
-            except Exception as e:
-                click.echo(f"  skipped {node['name']}: {e}", err=True)
-    conn.commit()
-    click.echo(f"Reindexed {done}/{len(nodes)} node(s).")
+    if everything:
+        conn.execute("UPDATE nodes SET embedding = NULL WHERE archived = 0")
+        conn.commit()
+    todo = [n["id"] for n in nodes if everything or not n["embedding"]]
+    if not todo:
+        click.echo(f"All {len(nodes)} active node(s) already have embeddings (--all to redo).")
+        return
+    done = extract.embed_nodes(conn, todo)
+    click.echo(f"Embedded {done}/{len(todo)} node(s)" + ("" if done == len(todo) else " — the rest failed; rerun later")
+               + f" ({len(nodes)} active).")
 
 
 # ── synthesize ────────────────────────────────────────────────────────────────
