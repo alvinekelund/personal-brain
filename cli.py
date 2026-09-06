@@ -223,7 +223,8 @@ def context(topic, depth, min_weight):
     click.echo(
         f"Synthesising context from {len(all_nodes)} node(s)...", err=True
     )
-    doc = graph.synthesize_context(all_nodes, topic=topic)
+    file_lines, ledger_lines = graph.context_material(conn, topic, all_nodes)
+    doc = graph.synthesize_context(all_nodes, topic=topic, file_lines=file_lines, ledger_lines=ledger_lines)
     click.echo(doc)
 
 

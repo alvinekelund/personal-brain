@@ -209,7 +209,8 @@ def _context(conn, args):
     nodes, used_fallback = graph.collect_context_nodes(conn, topic=topic)
     if not nodes:
         return "The brain is empty — nothing to brief on yet."
-    doc = graph.synthesize_context(nodes, topic=topic)
+    file_lines, ledger_lines = graph.context_material(conn, topic, nodes)
+    doc = graph.synthesize_context(nodes, topic=topic, file_lines=file_lines, ledger_lines=ledger_lines)
     if topic and used_fallback:
         doc = f"(Nothing matched '{topic}' directly; this briefs the whole brain.)\n\n" + doc
     return doc

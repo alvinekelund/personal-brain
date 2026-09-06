@@ -325,6 +325,35 @@ class SearchTests(IndexTestCase):
 
 
 class AnswerTests(IndexTestCase):
+    def test_context_briefing_reads_the_topic_files_and_ledgers(self):
+        """brain context / brain_context briefed "training" from graph nodes alone —
+        no race date, no forecast — although profile/athlete.md holds both. The
+        topic's files and ledger lines now ride along, and the prompt says the
+        file wins over the graph."""
+        from brain import loops
+        index.build(self.conn, self.root, embed=False)
+        (self.root / "LOOPS.md").unlink(missing_ok=True)
+        loops.add(self.root, "Cut rule for STAT 211 by Sep 21", "2026-09-21", "alvin", "harvard",
+                  "decide keep or drop", commit=False)
+        stat = db.add_node(self.conn, "STAT 211", type_="concept", content="Inference course.")
+        self.conn.commit()
+        nodes = {stat: db.get_node(self.conn, stat)}
+        file_lines, ledger_lines = graph.context_material(self.conn, "STAT 211 sections", nodes, root=self.root)
+        self.assertTrue(any("courses/stat-211.md" in ln for ln in file_lines), file_lines)
+        self.assertTrue(any("Cut rule for STAT 211" in ln for ln in ledger_lines), ledger_lines)
+        self.assertEqual(graph.context_material(self.conn, "   ", nodes, root=self.root), ([], []))
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.setdefault("p", p), "doc")[1]
+        try:
+            graph.synthesize_context(nodes, topic="STAT 211", file_lines=file_lines, ledger_lines=ledger_lines)
+        finally:
+            llm.generate = orig
+        p = captured["p"]
+        self.assertIn("courses/stat-211.md", p)
+        self.assertIn("Cut rule for STAT 211", p)
+        self.assertIn("the file wins", p)
+
     def test_answer_question_reads_the_files_first(self):
         index.build(self.conn, self.root, embed=False)
         seen = {}

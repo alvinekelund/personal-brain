@@ -103,9 +103,12 @@ def collect_context_nodes(conn, topic: str = "", depth: int = 3, min_weight: flo
     return bfs(conn, start_ids, depth=depth, min_weight=min_weight, hub_degree=cap), used_fallback
 
 
-def synthesize_context(nodes: dict, topic: str = "") -> str:
-    """Call the LLM to synthesise a context document from a node collection."""
-    if not nodes:
+def synthesize_context(nodes: dict, topic: str = "", file_lines: list | None = None,
+                       ledger_lines: list | None = None) -> str:
+    """Call the LLM to synthesise a context document from a node collection,
+    plus (D-014) excerpts of the vault files and ledger lines that match the
+    topic — the graph alone briefed "training" without the race date."""
+    if not nodes and not file_lines and not ledger_lines:
         return "No relevant knowledge found."
 
     def imp(n):
@@ -122,12 +125,18 @@ def synthesize_context(nodes: dict, topic: str = "") -> str:
         lines = [f"  - {i['name']} (importance {imp(i):.2f}): {i['content']}" for i in items]
         sections.append(f"{t.upper()}S\n" + "\n".join(lines))
 
-    node_dump = "\n\n".join(sections)
+    node_dump = "\n\n".join(sections) if sections else "(no graph nodes)"
+    extra = ""
+    if ledger_lines:
+        extra += "\n\nLedgers (settled decisions and open loops — the most reliable facts):\n" + "\n".join(ledger_lines)
+    if file_lines:
+        extra += ("\n\nFiles (the vault is the source of truth; where a file and the graph disagree, "
+                  "the file wins; dates and numbers come from here):\n" + "\n".join(file_lines))
 
     prompt = f"""Here is a personal knowledge graph{' about "' + topic + '"' if topic else ''}.
 Each item has an importance (0-1): how central and lasting it is to the person.
 
-{node_dump}
+{node_dump}{extra}
 
 Write a structured context document with sections:
 ## Background
@@ -141,6 +150,30 @@ details only briefly or omit them. Be concise and synthesise — don't just list
 facts. Write as if briefing someone who needs to understand this person quickly."""
 
     return llm.generate(prompt).strip()
+
+
+def context_material(conn, topic: str, nodes: dict, root=None) -> tuple[list[str], list[str]]:
+    """What a briefing needs beyond graph nodes (D-014): excerpts of the vault
+    files and the ledger lines that match the topic. Empty topic → nothing
+    (the whole-brain briefing has no query to route). Best-effort: never raises."""
+    if not (topic or "").strip():
+        return [], []
+    qvec = None
+    try:
+        if llm.have_key():
+            qvec = llm.embed(topic)
+    except Exception:
+        qvec = None
+    seeds = list(nodes.values())[:40] if nodes else []
+    try:
+        _, file_lines = file_context(conn, topic, seeds, root, query_vector=qvec)
+    except Exception:
+        file_lines = []
+    try:
+        ledger_lines, _ = ledger_context(topic, root, conn=conn, query_vector=qvec)
+    except Exception:
+        ledger_lines = []
+    return file_lines, ledger_lines
 
 
 def children_map(conn) -> dict:
