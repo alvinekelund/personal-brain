@@ -10,6 +10,7 @@ tests are deterministic and need no API key or network.
 """
 import io
 import json
+import math
 import os
 import sys
 import tempfile
@@ -142,6 +143,36 @@ class DecayTests(BrainTestCase):
     def test_person_never_decays(self):
         w = decay.current_weight(1.0, time.time() - 9999 * DAY, float("inf"))
         self.assertEqual(w, 1.0)
+
+    def test_low_importance_person_or_org_fades_like_a_concept(self):
+        """People and organizations are immortal only while they matter: 17
+        HackMIT sponsor orgs at importance 0.3 sat in the real graph forever.
+        Below IMMORTAL_MIN_IMPORTANCE they decay on the concept clock."""
+        sponsor = db.add_node(self.conn, "ASUS", type_="organization", importance=0.3)
+        passerby = db.add_node(self.conn, "Gordon T.", type_="person", importance=0.3)
+        employer = db.add_node(self.conn, "Miracle Consulting Group", type_="organization", importance=0.5)
+        self.conn.commit()
+        self.assertEqual(decay.node_half_life(float("inf"), "organization", 0.3), decay.DEMOTED_HALF_LIFE)
+        self.assertTrue(math.isinf(decay.node_half_life(float("inf"), "organization", 0.5)))
+        at_risk = {c["name"] for c in decay.at_risk_nodes(self.conn, limit=10)}
+        self.assertIn("ASUS", at_risk)                                   # visible in `brain status`
+        self.assertNotIn("Miracle Consulting Group", at_risk)
+        for nid in (sponsor, passerby, employer):
+            self._age(nid, 700)  # H_eff = 60*(1+4*0.3) = 132 d → 0.5**5.3 ≈ 0.025 < 0.10
+        decay.run_decay(self.conn)
+        self.assertEqual(db.get_node(self.conn, sponsor)["archived"], 1)
+        self.assertEqual(db.get_node(self.conn, passerby)["archived"], 1)
+        kept = db.get_node(self.conn, employer)
+        self.assertEqual((kept["archived"], kept["weight"]), (0, 1.0))    # still immortal
+
+    def test_category_is_never_demoted(self):
+        cat = db.add_node(self.conn, "Health", type_="category", importance=0.2)
+        self.conn.commit()
+        self.assertTrue(math.isinf(decay.node_half_life(float("inf"), "category", 0.2)))
+        self._age(cat, 3650)
+        decay.run_decay(self.conn)
+        row = db.get_node(self.conn, cat)
+        self.assertEqual((row["archived"], row["weight"]), (0, 1.0))
 
     def test_archives_below_threshold(self):
         nid = db.add_node(self.conn, "Ephemeral", type_="event", importance=0.1)  # low importance

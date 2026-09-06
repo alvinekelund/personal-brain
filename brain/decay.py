@@ -7,6 +7,22 @@ STRUCTURAL_RELATIONS = ("part_of",)   # hierarchy edges: may fade, never vanish
 ARCHIVE_THRESHOLD = 0.10     # weight below this → archived
 IMPORTANCE_GAIN = 4.0        # important nodes decay up to (1+gain)x slower
 IMPORTANCE_FLOOR = 0.15      # weight never drops below importance * this
+# People and organizations never decay - but only while they matter. Below this
+# importance a one-off sponsor or a passing acquaintance is remembered like a
+# concept (DEMOTED_HALF_LIFE, ~14 months untouched at importance 0.3) instead of
+# forever. Categories are the spine and stay immortal whatever their importance.
+IMMORTAL_MIN_IMPORTANCE = 0.4
+DEMOTED_HALF_LIFE = 60.0
+
+
+def node_half_life(half_life_days: float, node_type: str, importance: float) -> float:
+    """The half-life decay actually uses for a node: the stored one, except that
+    an immortal (inf) person/organization below IMMORTAL_MIN_IMPORTANCE gets
+    DEMOTED_HALF_LIFE. Categories are never demoted."""
+    if (math.isinf(half_life_days) and node_type != "category"
+            and (importance or 0.0) < IMMORTAL_MIN_IMPORTANCE):
+        return DEMOTED_HALF_LIFE
+    return half_life_days
 
 
 def days_until_archive(weight: float, half_life_days: float,
@@ -35,13 +51,15 @@ def at_risk_nodes(conn, limit: int = 5, threshold: float = ARCHIVE_THRESHOLD) ->
     importance-floored nodes (which won't archive) are excluded.
     """
     rows = conn.execute(
-        "SELECT * FROM nodes WHERE archived=0 AND weight >= ? AND half_life_days < 1e12",
-        (threshold,),
+        "SELECT * FROM nodes WHERE archived=0 AND weight >= ?", (threshold,),
     ).fetchall()
     cands = []
     for r in rows:
         imp = r["importance"] if "importance" in r.keys() else 0.0
-        days = days_until_archive(r["weight"], r["half_life_days"], threshold, imp)
+        hl = node_half_life(r["half_life_days"], r["type"], imp)
+        if math.isinf(hl):
+            continue  # immortal: person/org that matters, or a category
+        days = days_until_archive(r["weight"], hl, threshold, imp)
         if math.isinf(days):
             continue  # floored/important → not at risk
         cands.append({"name": r["name"], "type": r["type"], "weight": r["weight"],
@@ -85,7 +103,7 @@ def run_decay(conn) -> dict:
     Returns counts of updated / archived / deleted nodes + edges pruned.
     """
     nodes = conn.execute(
-        "SELECT id, weight, last_accessed, last_decayed, half_life_days, archived, importance FROM nodes"
+        "SELECT id, type, weight, last_accessed, last_decayed, half_life_days, archived, importance FROM nodes"
     ).fetchall()
 
     updated = archived = deleted = edges_pruned = 0
@@ -103,7 +121,8 @@ def run_decay(conn) -> dict:
         # that reset it), so decay only the interval since then. Calling decay
         # twice in a row is then a no-op instead of a second full decay.
         since = max(n["last_decayed"], n["last_accessed"])
-        new_w = current_weight(n["weight"], since, n["half_life_days"], n["importance"])
+        hl = node_half_life(n["half_life_days"], n["type"], n["importance"])
+        new_w = current_weight(n["weight"], since, hl, n["importance"])
         new_w = max(0.0, min(1.0, new_w))
 
         if new_w < 0.10:

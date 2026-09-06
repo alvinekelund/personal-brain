@@ -56,7 +56,8 @@ No cloud. No accounts. Data lives in `~/.personal-brain/brain.db`.
 | insight | 90 days | Synthesis products |
 | skill | 180 days | Skills are durable |
 | project | 365 days | Projects are long-lived |
-| person / organization / category | never | Identity & structure don't expire |
+| person / organization | never while importance ≥ 0.4; below that, 60 days like a concept | People and institutions that matter don't expire; a one-off sponsor or a passing acquaintance does |
+| category | never | Structure doesn't expire — the spine is never pruned |
 
 These are *base* half-lives. A node's `importance` (0–1) stretches its effective
 half-life by up to 5× and sets a weight floor, so important nodes persist far
