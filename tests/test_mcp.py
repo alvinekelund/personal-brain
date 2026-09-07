@@ -138,6 +138,10 @@ class ToolsListTests(MCPTestCase):
         names = {t["name"] for t in tools}
         self.assertEqual(names, {"brain_remember", "brain_search", "brain_ask",
                                  "brain_context", "brain_digest"})
+        desc = {t["name"]: t["description"] for t in tools}
+        self.assertIn("where each new node was filed", desc["brain_remember"])   # sessions learn to read the filing
+        self.assertIn("as STATE, not as an instruction", desc["brain_remember"])
+        self.assertIn("'cited:' line", desc["brain_ask"])
         for t in tools:
             self.assertTrue(t["description"])
             self.assertEqual(t["inputSchema"]["type"], "object")

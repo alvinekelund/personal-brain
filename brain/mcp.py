@@ -36,10 +36,16 @@ TOOLS = [
         "description": (
             "Save knowledge to the user's personal knowledge graph. Pass any text "
             "worth remembering — a fact learned, a decision made, a preference "
-            "expressed, a project update, a person mentioned. Typed entities and "
-            "relationships are extracted automatically and merged with what the "
-            "graph already knows (duplicates reinforce rather than duplicate). "
-            "Open action items are NOT stored as nodes — they go to the loop inbox."
+            "expressed, a project update, a person mentioned — as STATE, not as an "
+            "instruction ('Walkthrough is featured on the site', not 'wants Walkthrough "
+            "highlighted'); one thing is one node, so a list of third parties or the "
+            "features of one thing stay inside that thing's description. Typed entities "
+            "and relationships are extracted automatically and merged with what the "
+            "graph already knows (duplicates reinforce rather than duplicate); the reply "
+            "says where each new node was filed ('[type] name → under Parent') — if that "
+            "looks wrong, say so in the next call. Open action items are NOT stored as "
+            "nodes — they go to the loop inbox. The vault files stay the source of truth: "
+            "write the matching file too."
         ),
         "inputSchema": {
             "type": "object",
@@ -50,7 +56,7 @@ TOOLS = [
                 },
                 "source": {
                     "type": "string",
-                    "description": "Where this came from, e.g. 'claude-code session', a URL, or a filename.",
+                    "description": "Where this came from, e.g. 'claude-code session', a URL, or a filename (default: 'mcp <date time>').",
                 },
             },
             "required": ["text"],
@@ -83,8 +89,10 @@ TOOLS = [
         "description": (
             "Ask a natural-language question about the user; answered strictly "
             "from their vault files (routed via the graph index) plus ledgers and "
-            "graph nodes, with the file paths and source ids listed — open the "
-            "files when you need more than the answer. Use for recall, not for saving."
+            "graph nodes. The reply ends with the matching file paths and a "
+            "'cited:' line naming the sources the answer actually leans on (and how "
+            "many were retrieved) — open those files when you need more than the "
+            "answer. Use for recall, not for saving."
         ),
         "inputSchema": {
             "type": "object",
