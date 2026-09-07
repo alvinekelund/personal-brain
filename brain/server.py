@@ -35,10 +35,15 @@ def api_query(conn, q, semantic):
             db.touch_node(conn, r["id"])
         conn.commit()
         return [{"name": r["name"], "type": r["type"], "score": round(s, 3),
-                 "content": (r["content"] or "")[:140]} for s, r in scored]
+                 "content": (r["content"] or "")[:140], "path": _path(r)} for s, r in scored]
     res = graph.query_nodes(conn, q)[:12]
     return [{"name": r["name"], "type": r["type"], "weight": round(r["weight"], 2),
-             "content": (r["content"] or "")[:140]} for r in res]
+             "content": (r["content"] or "")[:140], "path": _path(r)} for r in res]
+
+
+def _path(r) -> str:
+    """The vault file behind a node (D-014) — the web view was the one surface that never said."""
+    return (r["path"] if "path" in r.keys() and r["path"] else "") or ""
 
 
 def api_ask(conn, q, history=None):

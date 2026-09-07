@@ -891,6 +891,11 @@ class ServerApiTests(BrainTestCase):
         self.conn.commit()
         out = server.api_query(self.conn, "transformers", semantic=False)
         self.assertTrue(any(r["name"] == "transformer architectures" for r in out))
+        self.assertEqual(next(r for r in out if r["name"] == "transformer architectures")["path"], "")   # no file yet
+        self.conn.execute("UPDATE nodes SET path = 'topics/transformers.md' WHERE name = 'transformer architectures'")
+        self.conn.commit()
+        out = server.api_query(self.conn, "transformers", semantic=False)
+        self.assertEqual(next(r for r in out if r["name"] == "transformer architectures")["path"], "topics/transformers.md")
 
     def test_api_node(self):
         from brain import server
