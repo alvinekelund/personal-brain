@@ -207,6 +207,8 @@ def _node_name_map(conn) -> dict[str, list]:
     by the bare name, so a file aliased "Walkthrough" links to it."""
     out: dict[str, list] = {}
     for n in db.all_nodes(conn):
+        if n["type"] == "category":
+            continue   # structure has no file: the Career area linked to profile/experience.md by its alias 'career'
         key = _norm(n["name"])
         out.setdefault(key, []).append(n)
         for bare in (_SCHOOL_PREFIX.sub("", key), _bare(n["name"])):

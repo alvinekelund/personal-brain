@@ -196,6 +196,14 @@ class BuildTests(IndexTestCase):
         index.build(self.conn, self.root, embed=False)
         self.assertEqual(db.get_node(self.conn, node)["path"], "apps/business-ledger.md")
 
+    def test_categories_never_link_to_files(self):
+        w(self.root / "profile/experience.md",
+          "---\ntype: profile\nname: Work experience\naliases: [experience, career]\nupdated: 2026-09-01\n---\n# Work\n- x\n")
+        cat = db.add_node(self.conn, "Career", type_="category")
+        self.conn.commit()
+        index.build(self.conn, self.root, embed=False)
+        self.assertIsNone(db.get_node(self.conn, cat)["path"])                  # structure has no file
+
     def test_qualified_node_name_links_by_its_bare_name(self):
         w(self.root / "projects/walkthrough.md",
           "---\ntype: project\nname: Walkthrough, Junction 2025 (Top 5 overall, 2nd Snap Spectacles track)\n"

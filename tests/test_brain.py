@@ -1143,6 +1143,11 @@ class SearchRankingTests(BrainTestCase):
         self.assertEqual(names[0], "MIT 9.522")
         self.assertEqual(set(names), {"MIT 9.522", "MIT", "MIT 6.C57"})
         self.assertEqual([r["name"] for r in db.search_nodes(self.conn, "mit 9.522")][0], "MIT 9.522")   # exact name first
+        db.add_node(self.conn, "Career", type_="category")
+        db.add_node(self.conn, "Career Goal", type_="insight", content="Found a company.")
+        self.conn.commit()
+        names = [r["name"] for r in db.search_nodes(self.conn, "career")]
+        self.assertEqual(names, ["Career Goal", "Career"])                        # knowledge before structure
 
 
 class MergeTests(BrainTestCase):

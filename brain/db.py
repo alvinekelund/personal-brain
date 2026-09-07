@@ -448,9 +448,10 @@ def search_nodes(conn, query, min_weight=0.0):
         name_tokens = set(_TOKEN_RE.findall(name))
         name_hits = sum(1 for t in tokens if any(_stem_eq(t, h) for h in name_tokens))
         exact = 1 if " ".join(_TOKEN_RE.findall(name)) == " ".join(sorted(tokens)) or q == name else 0
-        scored.append((hits, exact, name_hits, r["weight"], r))
+        entity = 0 if r["type"] == "category" else 1   # structure ranks after knowledge: "career" → the goal, then the area
+        scored.append((hits, entity, exact, name_hits, r["weight"], r))
 
-    scored.sort(key=lambda x: (x[0], x[1], x[2], x[3]), reverse=True)
+    scored.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]), reverse=True)
     return [r for *_, r in scored]
 
 
