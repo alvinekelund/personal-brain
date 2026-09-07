@@ -1036,7 +1036,7 @@ def today(today, days, brief, no_doctor):
     """Deterministic action card: countdowns, waits, Claude-owned loops, top actions."""
     root = _vault_root()
     day = _parse_day(today)
-    _auto_backup()
+    snapshot = _auto_backup()
     if brief:
         line = loops.brief(root, day)
         # record what the phone got: the weekly review could not verify a single
@@ -1051,6 +1051,8 @@ def today(today, days, brief, no_doctor):
     line = "" if no_doctor else doctor_mod.brief(doctor_mod.run(root, day))
     click.echo(loops.today_report(root, day, horizon=days, doctor_line=line,
                                   decisions=decisions.recent(root, day)))
+    if snapshot:
+        click.echo(f"\nbackup taken: {snapshot.name} (the newest was over {doctor_mod.BACKUP_MAX_AGE_D} days old)")
 
 
 @cli.command("doctor")

@@ -227,7 +227,9 @@ class CliTests(BrainTestCase):
             files = sorted((doctor.DATA_DIR / "backups").glob("brain-*.db"))
             self.assertEqual(len(files), 1)                                   # none existed: one taken
             self.assertIn("-auto", files[0].name)
-            self.run_cli("today", "--no-doctor")
+            self.assertIn(f"backup taken: {files[0].name}", r.output)          # and the card says so
+            r = self.run_cli("today", "--no-doctor")
+            self.assertNotIn("backup taken", r.output)                         # fresh: silent
             self.assertEqual(len(list((doctor.DATA_DIR / "backups").glob("brain-*.db"))), 1)   # fresh: none taken
             old = time.time() - (doctor.BACKUP_MAX_AGE_D + 1) * 86400
             os.utime(files[0], (old, old))
