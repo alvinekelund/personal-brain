@@ -279,15 +279,28 @@ def link_entities(new_nodes: list, existing_nodes: list) -> dict:
     if not new_nodes or not existing_nodes:
         return {}
 
-    new_names = [n["name"] for n in new_nodes]
-    existing_names = [n["name"] for n in existing_nodes[:HINT_LIMIT]]
+    # names alone are not enough: "Harvard Degree Program" and "Data Science
+    # Program" are the same degree named by school and by subject, and the
+    # linker let both stand on Sep 6 2026 — so each side carries a line of
+    # description and the rule says to match on what the thing is
+    def entry(n) -> str:
+        content = (n["content"] if hasattr(n, "keys") and "content" in n.keys() else "") or ""
+        content = " ".join(str(content).split())[:LINK_ABOUT_CHARS]
+        return f"{n['name']} — {content}" if content else str(n["name"])
+
+    new_entries = [entry(n) for n in new_nodes]
+    existing_entries = [entry(n) for n in existing_nodes[:HINT_LIMIT]]
 
     prompt = (
-        f"New entities just extracted from text: {json.dumps(new_names)}\n"
-        f"Entities already in the knowledge graph: {json.dumps(existing_names)}\n\n"
+        f"New entities just extracted from text (name — description):\n{json.dumps(new_entries, ensure_ascii=False)}\n"
+        f"Entities already in the knowledge graph (name — description):\n{json.dumps(existing_entries, ensure_ascii=False)}\n\n"
         f"For each new entity, decide if it refers to the exact same real-world entity as one already in the graph.\n"
-        f"Be conservative — only match when you are confident it is the same entity, not just related.\n"
-        f'Return ONLY JSON: {{"new_name": "existing_name"}} for matches. Empty object {{}} if none match.'
+        f"Judge by what the descriptions say the thing IS, not by the wording of the names: a degree program named "
+        f"by its school and the same program named by its subject are one entity, as are a person by first name and "
+        f"by full name. Be conservative about merely related things — a company and its internship programme, an event "
+        f"and its venue, a course and its instructor are NOT the same entity.\n"
+        f'Return ONLY JSON mapping new NAME to existing NAME (names only, no descriptions): {{"new_name": "existing_name"}}. '
+        f"Empty object {{}} if none match."
     )
 
     try:
@@ -870,6 +883,7 @@ def category_labels(conn) -> list[str]:
 
 
 HINT_LIMIT = 80
+LINK_ABOUT_CHARS = 120   # description shown per entity to the entity-linker
 CHUNK_WORKERS = 4   # parallel extraction calls for a multi-chunk input
 
 

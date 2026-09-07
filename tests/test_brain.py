@@ -919,6 +919,37 @@ class ServerApiTests(BrainTestCase):
         self.assertIn("football", text)
 
 
+class LinkEntitiesTests(BrainTestCase):
+    def test_linker_sees_descriptions_and_matches_by_what_things_are(self):
+        """'Harvard Degree Program' was extracted beside the existing 'Data Science
+        Program' on Sep 6 2026 and the linker, shown names only, let both stand.
+        It now sees a line of description per entity and is told to judge by it."""
+        existing = db.add_node(self.conn, "Data Science Program", type_="project",
+                               content="Harvard's SM in Data Science (IACS / SEAS): Alvin's degree program, Aug 2026 to Dec 2027.")
+        self.conn.commit()
+        rows = [db.get_node(self.conn, existing)]
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.setdefault("p", p), '{"Harvard Degree Program": "Data Science Program"}')[1]
+        try:
+            links = extract.link_entities([{"name": "Harvard Degree Program", "type": "concept",
+                                            "content": "Alvin is pursuing this degree and expects to finish it by the end of 2027."}], rows)
+        finally:
+            llm.generate = orig
+        self.assertEqual(links, {"Harvard Degree Program": "Data Science Program"})
+        self.assertIn("Harvard Degree Program — Alvin is pursuing this degree", captured["p"])
+        self.assertIn("Data Science Program — Harvard's SM in Data Science", captured["p"])
+        self.assertIn("named by its subject are one entity", captured["p"])
+        self.assertIn("names only, no descriptions", captured["p"])
+        long = {"name": "X", "content": "y" * 500}
+        llm.generate = lambda p, *a, **k: (captured.__setitem__("p2", p), "{}")[1]
+        try:
+            extract.link_entities([long], rows)
+        finally:
+            llm.generate = orig
+        self.assertNotIn("y" * (extract.LINK_ABOUT_CHARS + 1), captured["p2"])      # descriptions are capped
+
+
 class ReorganizeTests(BrainTestCase):
     def test_reorganize_builds_hierarchy_and_rescores(self):
         db.ensure_identity_anchor(self.conn, "Alvin")

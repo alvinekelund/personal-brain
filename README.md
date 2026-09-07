@@ -70,6 +70,7 @@ longer (and never auto-archive) while trivia decays on the base schedule.
 ```bash
 pip install -e .                    # installs dependencies from pyproject.toml
 export GEMINI_API_KEY=...           # or put it in ~/.personal-brain/.env
+brain setup --name "Your Name"      # names the owner: the root of the tree (nothing ingests before this)
 ```
 
 ---
