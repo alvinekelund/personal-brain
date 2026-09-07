@@ -894,7 +894,15 @@ def today(today, days, brief, no_doctor):
     root = _vault_root()
     day = _parse_day(today)
     if brief:
-        click.echo(loops.brief(root, day))
+        line = loops.brief(root, day)
+        # record what the phone got: the weekly review could not verify a single
+        # morning brief because the push leaves no trace (`brain doctor` reads this)
+        try:
+            with open(doctor_mod.DATA_DIR / "brief.log", "a", encoding="utf-8") as f:
+                f.write(f"{_dt.now().strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+        except OSError:
+            pass
+        click.echo(line)
         return
     line = "" if no_doctor else doctor_mod.brief(doctor_mod.run(root, day))
     click.echo(loops.today_report(root, day, horizon=days, doctor_line=line,

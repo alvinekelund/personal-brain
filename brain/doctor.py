@@ -152,6 +152,33 @@ def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None =
     return Check("capture", "ok", f"last run {age_h:.0f}h ago: {tail}" if age_h is not None else tail)
 
 
+BRIEF_MAX_AGE_H = 30   # the morning brief runs daily; older than this and it did not run or did not record
+
+
+def check_brief(log_path: Path = DATA_DIR / "brief.log", now: float | None = None) -> Check:
+    """The phone brief: `brain today --brief` records every line it produces in
+    brief.log, so a review can see what was pushed and when. No file, or a
+    line older than a day and a bit, means the morning brief did not run or
+    its prompt did not call `brain today --brief`."""
+    import re
+    now = now or time.time()
+    if not Path(log_path).is_file():
+        return Check("brief", "warn", "no brief.log yet — no `brain today --brief` has run (the morning brief should)")
+    lines = [l for l in Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+    last = lines[-1] if lines else ""
+    m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.*)", last)
+    if not m:
+        return Check("brief", "warn", "brief.log is empty or unreadable")
+    try:
+        age_h = _age_h(time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")), now)
+    except ValueError:
+        return Check("brief", "warn", "brief.log has an unreadable timestamp")
+    text = m.group(2)[:90]
+    if age_h > BRIEF_MAX_AGE_H:
+        return Check("brief", "warn", f"last brief {age_h:.0f}h ago — the morning brief did not run or did not record: {text}")
+    return Check("brief", "ok", f"last brief {age_h:.0f}h ago: {text}")
+
+
 def check_index(db_path: Path = DB_PATH, root: Path | None = None) -> Check:
     """Is the vault index current? (D-014: the directory is the brain; the graph
     routes questions to its files, so a stale index sends `brain ask` to old text.)"""
@@ -315,11 +342,14 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         db_path: Path = DB_PATH, expected_bin: Path = EXPECTED_BIN,
         settings: Path | None = CLAUDE_SETTINGS, claude_json: Path | None = CLAUDE_JSON,
         tasks_dir: Path | None = SCHEDULED_TASKS, api_probe=None,
-        capture_log: Path | None = DATA_DIR / "capture.log") -> list[Check]:
+        capture_log: Path | None = DATA_DIR / "capture.log",
+        brief_log: Path | None = DATA_DIR / "brief.log") -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
               check_key(), check_api(api_probe)]
     if capture_log is not None:
         checks.append(check_capture(capture_log, now))
+    if brief_log is not None:
+        checks.append(check_brief(brief_log, now))
     checks += check_vault(root, today, now)
     checks.append(check_index(db_path, root))
     checks += check_wiring(settings, claude_json, tasks_dir)

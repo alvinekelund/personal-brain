@@ -109,3 +109,22 @@ class CliTests(BrainTestCase):
         r = self.run_cli("describe", "Padel", "   ")
         self.assertEqual(r.exit_code, 1)
         self.assertIn("empty", r.output)
+
+    def test_today_brief_records_its_line(self):
+        """The morning brief left no trace (weekly review W36): `today --brief`
+        now appends what it produced to brief.log, which the doctor reads."""
+        import tempfile
+        import brain.doctor as doctor
+        orig = doctor.DATA_DIR
+        doctor.DATA_DIR = Path(tempfile.mkdtemp())
+        try:
+            r = self.run_cli("today", "--brief")
+            self.assertEqual(r.exit_code, 0, r.output)
+            log = (doctor.DATA_DIR / "brief.log").read_text().strip().splitlines()
+            self.assertEqual(len(log), 1)
+            self.assertTrue(log[0].endswith(r.output.strip()), log[0])
+            self.assertRegex(log[0], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ")
+            self.run_cli("today", "--brief")
+            self.assertEqual(len((doctor.DATA_DIR / "brief.log").read_text().strip().splitlines()), 2)
+        finally:
+            doctor.DATA_DIR = orig

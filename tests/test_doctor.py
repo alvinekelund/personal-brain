@@ -53,6 +53,8 @@ class DoctorTests(unittest.TestCase):
         self.claude_json.write_text(json.dumps({"mcpServers": {"brain": {"command": str(self.bin), "args": ["mcp"]}}}))
         self.capture_log = self.tmp / "capture.log"
         self.capture_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " session abc: ingested 2 node(s)\n")
+        self.brief_log = self.tmp / "brief.log"
+        self.brief_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " Seat lock in 3d: enroll 9.522\n")
         self.tasks = self.tmp / "scheduled-tasks"
         (self.tasks / "nightly").mkdir(parents=True)
         (self.tasks / "nightly" / "SKILL.md").write_text(f"run {self.bin} add \"fact\"\n")
@@ -67,7 +69,7 @@ class DoctorTests(unittest.TestCase):
             raise urllib.error.HTTPError("https://x/", 404, "nf", {}, None)
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
                     settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
-                    api_probe=reachable, capture_log=self.capture_log)
+                    api_probe=reachable, capture_log=self.capture_log, brief_log=self.brief_log)
         args.update(kw)
         return doctor.run(**args)
 
@@ -78,7 +80,7 @@ class DoctorTests(unittest.TestCase):
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
         now.write(self.root)                      # NOW.md becomes generated → the now.md check applies
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "graph-tree", "gemini-key", "gemini-api", "capture", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "graph-tree", "gemini-key", "gemini-api", "capture", "brief", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -112,6 +114,24 @@ class DoctorTests(unittest.TestCase):
         checks = by_name(self.run_doctor())
         self.assertEqual(checks["vault-index"].status, "warn")
         self.assertIn("changed since the last index", checks["vault-index"].detail)
+
+    def test_brief_check_reads_the_recorded_push(self):
+        """Weekly review W36: the morning brief left no trace, so no review could
+        verify a single push. `brain today --brief` records its line; the doctor
+        shows the last one and warns when a day and a bit has passed without one."""
+        checks = by_name(self.run_doctor())
+        self.assertEqual(checks["brief"].status, "ok", checks["brief"].detail)
+        self.assertIn("Seat lock in 3d", checks["brief"].detail)
+        old = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 40 * 3600))
+        self.brief_log.write_text(old + " Protopapas email due today\n")
+        checks = by_name(self.run_doctor())
+        self.assertEqual(checks["brief"].status, "warn")
+        self.assertIn("did not run or did not record", checks["brief"].detail)
+        self.brief_log.unlink()
+        checks = by_name(self.run_doctor())
+        self.assertEqual(checks["brief"].status, "warn")
+        self.assertIn("no brief.log yet", checks["brief"].detail)
+        self.assertNotIn("brief", by_name(self.run_doctor(brief_log=None)))   # disabled by callers that want to
 
     def test_missing_binary_is_loud_everywhere(self):
         self.bin.unlink()
