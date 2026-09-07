@@ -1,15 +1,15 @@
 # Changelog
 
-Newest first. One section per day of work; each bullet names what changed and why, with the commits that carry it (`git log 5af0c6c..7642567` lists all 102 of Sep 6).
+Newest first. One section per day of work; each bullet names what changed and why, with the commits that carry it (`git log 5af0c6c..7642567` lists all 110 of Sep 6).
 
-## 2026-09-06 — 102 commits, 375 tests, CI green
+## 2026-09-06 — 110 commits, 380 tests, CI green
 
 **Ingest and extraction**
 - Gemini calls carry a wall-clock budget; `brain add` shows its stages and every retry wait; long inputs are extracted chunk-parallel (`5af0c6c`, `c36812c`, `a8ce5d7`, `e440256`).
 - The extractor sees the *relevant* existing nodes (keyword + semantic + importance), re-mentioned nodes absorb new content, attributes of known entities become facts under them, vague names and bare time periods are refused, a course named by its code is a concept (`a6ece9b`, `2aeb567`, `51e960c`, `7a8990d`, `8e2ab78`).
 - One thing is one node: a list of third parties is one fact, the features of one thing are its content, a site/CV edit wish is not a node; the entity-linker judges by descriptions, not names (`46c1441`, `bf7e3d9`, `bcba1f6`; decision D-020 in the vault).
 - Nothing ingests before `brain setup` names the owner; `add` and the MCP tool report where each node was filed and stamp a default source (`c0a07f9`, `dedcbb1`, `0a5fa4d`).
-- A forgotten node comes back when new knowledge names it (`a620810`); passive relations are oriented agent-at-target and a `relates_to` never doubles a `part_of` (`e39dc3b`, `ef0be37`).
+- A forgotten node comes back when new knowledge names it (`a620810`); loop lint flags next actions that are narrative (`a439f4f`); passive relations are oriented agent-at-target and a `relates_to` never doubles a `part_of` (`e39dc3b`, `ef0be37`).
 
 **Structure and curation**
 - Deterministic curation commands: `merge` (by name too), `move`, `rename`, `retype`, `describe`, `forget`, `reinforce`, `importance`, `unlink`, `subgroup`; each re-renders and commits the vault views (`41e89b3` … `ec534d2`, `645f530`).
@@ -29,7 +29,7 @@ Newest first. One section per day of work; each bullet names what changed and wh
 - Embeddings are packed float32 (brain.db 28 MB → 9.6 MB), migrated on connect; exports still carry plain lists (`04b250f`).
 - `brain backup` takes consistent snapshots with rotation; the daily card takes one when the newest is stale and says so (`e1948b0`, `5964d1c`, `1dfb373`).
 - Decay: people and organisations are immortal only while they matter; an event does not fade before its date; top of mind = importance × recency (`3566621`, `1f54928`, `e2be6c2`).
-- Vault commits wait out another process's `index.lock` (`7642567`); export/import restore importance, the decay clock, embeddings and the ingestion log (`e68cc48`, `7241bb4`).
+- Vault commits wait out another process's `index.lock` (`7642567`); `prune` and decay refresh the views when they forget a node (`2b0c1bd`, `722bb81`); the incremental index refreshes derived kinds and index pages rank below the file that answers (`b6ee1f2`, `56b0d65`); export/import restore importance, the decay clock, embeddings and the ingestion log (`e68cc48`, `7241bb4`).
 
 ## Before 2026-09-06
 
