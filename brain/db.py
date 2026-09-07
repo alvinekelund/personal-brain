@@ -540,6 +540,25 @@ def retype_node(conn, node_id, new_type) -> str | None:
     return None
 
 
+def set_importance(conn, node_id, value) -> str | None:
+    """Set a node's importance (0-1) deterministically — it drives top-of-mind,
+    digest ranking and how slowly the node decays, and ingest scores it once
+    from one sentence ("Alvin's apartment is really nice" landed at 0.9).
+    Refuses, returning the reason, for a missing node or a value off the scale."""
+    node = get_node(conn, node_id)
+    if not node:
+        return "node not found"
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return f"importance must be a number between 0 and 1, not {value!r}"
+    if not 0.0 <= value <= 1.0:
+        return f"importance must be between 0 and 1, not {value:g}"
+    conn.execute("UPDATE nodes SET importance = ? WHERE id = ?", (value, node_id))
+    conn.commit()
+    return None
+
+
 def set_content(conn, node_id, content) -> str | None:
     """Replace a node's content in place — for a correction, where ingest's
     append-on-re-mention would leave the stale sentence standing ("stored at

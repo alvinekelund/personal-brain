@@ -171,6 +171,7 @@ brain clear                      # erase the entire brain (asks to confirm; -y t
 
 # Manual ops
 brain reinforce <node>           # boost weight to 1.0 (id or exact name)
+brain importance <node> <0-1>                    # set importance deterministically (top of mind, digest rank, decay speed)
 brain forget <node>              # archive now (never the person, a category, or a node with children)
 brain merge <id1> <id2>          # merge id2 into id1 (keeps one parent, takes the higher importance)
 brain move <node> <parent>       # re-home a node (ids or exact names); no cycles, categories only under you

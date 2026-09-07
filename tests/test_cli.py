@@ -152,6 +152,18 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_importance_by_name_with_bounds(self):
+        r = self.run_cli("importance", "Padel", "0.2")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("0.50 → 0.20", r.output)
+        self.assertAlmostEqual(db.get_node(self.conn, self.padel)["importance"], 0.2)
+        r = self.run_cli("importance", "Padel", "7")
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("between 0 and 1", r.output)
+        r = self.run_cli("importance", "Nope", "0.5")
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("not found", r.output)
+
     def test_stale_lists_old_plan_tense_claims(self):
         import time
         r = self.run_cli("stale")

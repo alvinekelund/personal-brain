@@ -650,6 +650,26 @@ def forget(node):
 
 @cli.command()
 @click.argument("node")
+@click.argument("value", type=float)
+def importance(node, value):
+    """Set NODE's importance (0-1; id or exact name). Importance drives the digest's
+    top of mind and how slowly a node decays; ingest scores it once from one sentence,
+    so a throwaway remark can sit at 0.9 until someone says otherwise."""
+    conn = db.connect()
+    n = db.get_node(conn, node) or db.get_node_by_name(conn, node)
+    if not n:
+        click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    err = db.set_importance(conn, n["id"], value)
+    if err:
+        click.echo(f"Not changed: {err}", err=True)
+        sys.exit(1)
+    vault.auto_render(conn, config.get_user(), commit=f"importance: {n['name']} → {value:.2f}")
+    click.echo(f"Importance of {n['name']!r}: {n['importance']:.2f} → {value:.2f}")
+
+
+@cli.command()
+@click.argument("node")
 def reinforce(node):
     """Boost NODE's weight to 1.0 (id or exact name) — the same as an access; the
     freshness boost propagates up its branch."""

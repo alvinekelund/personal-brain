@@ -1318,6 +1318,19 @@ class RetypeNodeTests(BrainTestCase):
         self.assertEqual((n["type"], n["half_life_days"]), ("skill", db.HALF_LIVES["skill"]))
 
 
+class ImportanceTests(BrainTestCase):
+    def test_set_importance_bounds_and_effect(self):
+        nid = db.add_node(self.conn, "Alvin's Apartment", type_="fact", content="Really nice.", importance=0.9)
+        self.conn.commit()
+        self.assertIsNone(db.set_importance(self.conn, nid, 0.3))
+        self.assertAlmostEqual(db.get_node(self.conn, nid)["importance"], 0.3)
+        self.assertIn("between 0 and 1", db.set_importance(self.conn, nid, 1.5))
+        self.assertIn("between 0 and 1", db.set_importance(self.conn, nid, -0.1))
+        self.assertIn("not a number", db.set_importance(self.conn, nid, "high").replace("must be a number", "not a number"))
+        self.assertEqual(db.set_importance(self.conn, "nope", 0.5), "node not found")
+        self.assertAlmostEqual(db.get_node(self.conn, nid)["importance"], 0.3)      # refusals change nothing
+
+
 class DescribeNodeTests(BrainTestCase):
     def test_replaces_content_and_clears_the_embedding(self):
         a = db.add_node(self.conn, "personal-brain", type_="project",
