@@ -244,6 +244,7 @@ def reorganize():
     if not edges and not rescored:
         click.echo("Nothing to reorganize.")
         return
+    vault.auto_render(conn, config.get_user(), commit=f"reorganize: {edges} hierarchy edge(s), {rescored} importance update(s)")
     click.echo(f"Reorganized: {edges} hierarchy edge(s), {rescored} importance update(s). "
                f"Run `brain tree` to see it.")
 
@@ -507,7 +508,7 @@ def merge(id1, id2):
         click.echo("That is the same node twice.", err=True)
         sys.exit(1)
     db.merge_nodes(conn, n1["id"], n2["id"])
-    vault.auto_render(conn, config.get_user())
+    vault.auto_render(conn, config.get_user(), commit=f"merge: {n2['name']} → {n1['name']}")
     click.echo(f"Merged {n2['name']} → {n1['name']}")
 
 
@@ -535,7 +536,7 @@ def move(node, parent):
     if err:
         click.echo(f"Not moved: {err}", err=True)
         sys.exit(1)
-    vault.auto_render(conn, user)
+    vault.auto_render(conn, user, commit=f"move: {n['name']} → under {p['name']}")
     click.echo(f"Moved {n['name']} → under {p['name']}")
 
 
@@ -562,7 +563,7 @@ def rename(node, new_name):
             conn.commit()
         except Exception as e:
             click.echo(f"  (embedding not refreshed: {e} — `brain reindex` later)", err=True)
-    vault.auto_render(conn, config.get_user())
+    vault.auto_render(conn, config.get_user(), commit=f"rename: {old} → {new_name}")
     click.echo(f"Renamed {old!r} → {new_name!r}  (run `brain index` to re-link it to a vault file)")
 
 
@@ -581,7 +582,7 @@ def retype(node, new_type):
     if err:
         click.echo(f"Not retyped: {err}", err=True)
         sys.exit(1)
-    vault.auto_render(conn, config.get_user())
+    vault.auto_render(conn, config.get_user(), commit=f"retype: {n['name']} → {db.get_node(conn, n['id'])['type']}")
     click.echo(f"Retyped {n['name']!r}: {n['type']} → {db.get_node(conn, n['id'])['type']}")
 
 
@@ -607,7 +608,7 @@ def describe(node, content):
             conn.commit()
         except Exception as e:
             click.echo(f"  (embedding not refreshed: {e} — `brain reindex` later)", err=True)
-    vault.auto_render(conn, config.get_user())
+    vault.auto_render(conn, config.get_user(), commit=f"describe: {n['name']}")
     click.echo(f"Described {n['name']!r} ({len(content.strip())} chars).")
 
 
@@ -641,7 +642,7 @@ def forget(node):
         sys.exit(1)
     db.archive_node(conn, n["id"])
     conn.commit()
-    vault.auto_render(conn, user)
+    vault.auto_render(conn, user, commit=f"forget: {n['name']}")
     click.echo(f"Archived {n['name']!r} ({n['type']}).")
 
 
@@ -658,6 +659,7 @@ def reinforce(node):
         click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
         sys.exit(1)
     db.touch_node(conn, n["id"])
+    vault.auto_render(conn, config.get_user(), commit=f"reinforce: {n['name']}")
     conn.commit()
     click.echo(f"Reinforced {n['name']!r}: weight 1.0.")
 
@@ -959,7 +961,7 @@ def _repair():
     before = integrity.check(conn, config.get_user())
     fixed = integrity.repair(conn, config.get_user())
     after = integrity.check(conn, config.get_user())
-    vault.auto_render(conn, config.get_user())
+    vault.auto_render(conn, config.get_user(), commit="repair: tree invariants restored")
     click.echo("repair: " + ", ".join(f"{k}={v}" for k, v in fixed.items() if v) if any(fixed.values()) else "repair: nothing structural to fix")
     click.echo(f"before: {before.summary()}\nafter:  {after.summary()}")
     return after
@@ -986,7 +988,7 @@ def subgroup(threshold):
     before = {n["name"] for n in db.all_nodes(conn) if n["type"] == "category"}
     moved = extract.subgroup_categories(conn, threshold=threshold)
     after = {n["name"] for n in db.all_nodes(conn) if n["type"] == "category"}
-    vault.auto_render(conn, config.get_user())
+    vault.auto_render(conn, config.get_user(), commit=f"subgroup: {moved} node(s) re-parented")
     new = sorted(after - before)
     click.echo(f"Re-parented {moved} node(s) into {len(new)} new sub-categor{'y' if len(new) == 1 else 'ies'}"
                + (": " + ", ".join(new) if new else "") + ". `brain tree` to review, `brain move` to adjust.")

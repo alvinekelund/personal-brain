@@ -151,3 +151,33 @@ class CliTests(BrainTestCase):
         r = self.run_cli("forget", "Padel")                              # child archived: now allowed
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
+
+    def test_curation_commands_commit_their_views(self):
+        """Regression (Sep 6 2026): merge/move/rename/... re-rendered DIGEST.md
+        and graph/ but left them uncommitted, so nine curation commands in a row
+        left the vault dirty for the doctor to complain about. Ingest already
+        commits its own writes (scoped); the curation commands now do the same."""
+        import subprocess
+        for cmd in (["git", "init", "-q"], ["git", "config", "user.email", "t@test"],
+                    ["git", "config", "user.name", "t"]):
+            subprocess.run(cmd, cwd=self.vault_tmp, check=True, capture_output=True)
+        (self.vault_tmp / "areas.md").write_text("curated, mid-edit")
+
+        def porcelain():
+            r = subprocess.run(["git", "status", "--porcelain"], cwd=self.vault_tmp, capture_output=True, text=True)
+            return [l for l in r.stdout.splitlines() if l.strip()]
+
+        def last():
+            return subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.vault_tmp,
+                                  capture_output=True, text=True).stdout.strip()
+        r = self.run_cli("move", "Padel", "Hobbies")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(porcelain(), ["?? areas.md"])                       # the mid-edit file is left alone
+        self.assertEqual(last(), "move: Padel → under Hobbies")
+        self.assertTrue((self.vault_tmp / "graph" / "hobbies.md").is_file())
+        self.run_cli("rename", "Padel", "Padel (racket sport)")
+        self.assertEqual(last(), "rename: Padel → Padel (racket sport)")
+        self.run_cli("forget", "Padel (racket sport)")
+        self.assertEqual(last(), "forget: Padel (racket sport)")
+        self.assertEqual(porcelain(), ["?? areas.md"])
+

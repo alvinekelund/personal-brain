@@ -175,15 +175,25 @@ def render(conn, user: str = "", dest=None) -> list[Path]:
     return written
 
 
-def auto_render(conn, user: str = ""):
-    """Best-effort vault refresh after an ingest (config `vault_auto`, default on).
+def auto_render(conn, user: str = "", commit: str | None = None):
+    """Best-effort vault refresh after a write (config `vault_auto`, default on).
 
-    The file layer must never break the write path — failures are swallowed;
-    run `brain vault` directly to see them.
+    `commit` is a message: when given, the generated views (DIGEST.md, graph/)
+    are committed under it — scoped, so a curated file mid-edit is left alone.
+    Ingest commits its own writes; the curation commands (merge, move, rename,
+    ...) pass a message here so they do too, instead of leaving the vault dirty
+    for the doctor to complain about. The file layer must never break the
+    write path — failures are swallowed; run `brain vault` directly to see them.
     """
     if not config.load().get("vault_auto", True):
         return
     try:
         render(conn, user)
     except Exception:
-        pass
+        return
+    if commit:
+        try:
+            from brain import loops
+            loops.git_commit_paths(vault_dir(), ["DIGEST.md", "graph"], commit)
+        except Exception:
+            pass
