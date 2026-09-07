@@ -147,6 +147,36 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r.summary(), "tree intact")
         self.assertEqual(r.thin_areas, [])        # one area with one node: a young brain, not sprawl
 
+    def test_same_file_duplicates_need_an_entity_file_and_an_exact_link(self):
+        """After the three-pass linker, 'Grandfather's Funeral' and 'Move to
+        Boston' both linked to profile/background.md and two training nodes
+        inherited areas/training.md — 10 false duplicate pairs on Sep 6 2026.
+        Only an entity file reached by the node's own name or alias counts."""
+        import brain.index as index
+        c = self.conn
+        c.executescript(index.SCHEMA)
+        db.ensure_identity_anchor(c, "Alvin")
+        me = db.get_node_by_name(c, "Alvin")["id"]
+        life = db.add_node(c, "Personal Life", type_="category"); db.add_edge(c, life, me, "part_of")
+        a = db.add_node(c, "Grandfather's Funeral", type_="event"); db.add_edge(c, a, life, "part_of")
+        b = db.add_node(c, "Move to Boston", type_="event"); db.add_edge(c, b, life, "part_of")
+        for nid in (a, b):
+            c.execute("UPDATE nodes SET path = 'profile/background.md' WHERE id = ?", (nid,))
+            c.execute("INSERT INTO vault_file_nodes (path, node_id, how) VALUES ('profile/background.md', ?, 'alias')", (nid,))
+        club = db.add_node(c, "Aalto Triathlon Club", type_="organization"); db.add_edge(c, club, life, "part_of")
+        kit = db.add_node(c, "Trimtex", type_="organization"); db.add_edge(c, kit, life, "part_of")
+        c.execute("UPDATE nodes SET path = 'orgs/atc.md' WHERE id IN (?, ?)", (club, kit))
+        c.execute("INSERT INTO vault_file_nodes (path, node_id, how) VALUES ('orgs/atc.md', ?, 'name')", (club,))
+        c.execute("INSERT INTO vault_file_nodes (path, node_id, how) VALUES ('orgs/atc.md', ?, 'inherited')", (kit,))
+        oy = db.add_node(c, "Miracle Oy", type_="organization"); db.add_edge(c, oy, life, "part_of")
+        mcg = db.add_node(c, "Miracle Consulting Group", type_="organization"); db.add_edge(c, mcg, life, "part_of")
+        for nid, how in ((oy, "alias"), (mcg, "name")):
+            c.execute("UPDATE nodes SET path = 'orgs/miracle.md' WHERE id = ?", (nid,))
+            c.execute("INSERT INTO vault_file_nodes (path, node_id, how) VALUES ('orgs/miracle.md', ?, ?)", (nid, how))
+        c.commit()
+        r = integrity.check(c, "Alvin")
+        self.assertEqual(r.duplicates, [("Miracle Oy", "Miracle Consulting Group")])
+
     def test_semantic_duplicates_from_stored_embeddings(self):
         """Two same-type nodes whose embeddings all but coincide are the same
         thing twice ("Current Semester Start" / "SM Data Science Start", 0.896

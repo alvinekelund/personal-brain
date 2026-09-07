@@ -22,6 +22,7 @@ FALLBACK_CATEGORY = {
     "fact": "Knowledge", "insight": "Insights", "concept": "Knowledge",
 }
 DUP_RATIO = 0.9
+ENTITY_FILE_KINDS = {"person", "org", "project", "course", "application", "app", "topic"}   # one file = one entity
 SEMANTIC_DUP_MIN = 0.89   # cosine between two same-type nodes' stored embeddings that means "the same thing twice"
 _STRIP = re.compile(r"[^a-z0-9 ]+")
 _POSSESSIVE = re.compile(r"\b(?:alvin'?s?|my|the)\b")
@@ -256,10 +257,23 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
     # two nodes of one type that `brain index` maps to the same vault file are,
     # by that file's own title + alias list, one entity — the name-ratio check
     # above misses pairs like "Miracle" / "Miracle Oy" (0.82), the vault does not
+    # ...but only when the file IS an entity (a person, org, project, course,
+    # application, app or topic file) and the link came from the node's own name
+    # or alias: a profile or area file covers many things, and a link a node
+    # inherited from its parent or got from a phrase inside its name says
+    # "this file covers it", not "this file is it" — 10 false pairs on Sep 6 2026
+    from brain.index import kind_of
+    loose: set[str] = set()
+    try:
+        loose = {r[0] for r in conn.execute(
+            "SELECT node_id FROM vault_file_nodes WHERE how IN ('contains', 'inherited')")}
+    except Exception:
+        pass   # no index tables yet: every stamped path counts
     by_file: dict[tuple, list] = {}
     for nid, n in nodes.items():
         path = n["path"] if "path" in n.keys() else None
-        if path and n["type"] != "category":
+        if (path and n["type"] != "category" and nid not in loose
+                and kind_of(path, {}) in ENTITY_FILE_KINDS):
             by_file.setdefault((path, n["type"]), []).append(nid)
     seen_pairs = {frozenset(p) for p in r.duplicates}
     for ids in by_file.values():
