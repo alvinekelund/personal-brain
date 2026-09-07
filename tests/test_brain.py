@@ -842,6 +842,9 @@ class IngestTests(BrainTestCase):
     def test_prompt_has_no_task_node_type(self):
         self.assertNotIn("task         —", extract.SYSTEM)
         self.assertIn('"tasks": ["..."]', extract.SYSTEM)
+        flat = " ".join(extract.SYSTEM.split())
+        self.assertIn("is ONE `fact` node naming them all", flat)              # sponsors/vendors: one fact, not one node per name
+        self.assertIn("never one node per name", flat)
         self.assertNotIn("task", extract.FALLBACK_CATEGORY)
 
 

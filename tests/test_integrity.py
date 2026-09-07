@@ -51,6 +51,10 @@ class IntegrityTests(BrainTestCase):
         # one course captured under two types — the per-type ratio check never compares them
         for name, type_ in (("AC 215", "concept"), ("AC215", "event")):
             nid = db.add_node(c, name, type_=type_); db.add_edge(c, nid, edu, "part_of")
+        # an event wearing its sponsor list as children: a flat list, not structure
+        hack = db.add_node(c, "HackMIT", type_="event"); db.add_edge(c, hack, career, "part_of")
+        for name in ("Long Lake", "ASUS", "Cursor", "Ramp"):
+            nid = db.add_node(c, name, type_="organization"); db.add_edge(c, nid, hack, "part_of")
         c.commit()
 
     def test_check_reports_every_problem(self):
@@ -74,6 +78,10 @@ class IntegrityTests(BrainTestCase):
         self.assertTrue(r3.oversized and r3.oversized[0][0] == "Education", r3.oversized)
         self.assertIn("(brain subgroup)", r3.summary())
         self.assertFalse(r3.clean)
+        self.assertEqual(r.flat_lists, [])
+        self.assertEqual(r3.flat_lists, [("HackMIT", 4)])                          # not in oversized: subgroup can't split it
+        self.assertNotIn("HackMIT", [n for n, _ in r3.oversized])
+        self.assertIn("flat list(s): HackMIT (4) (one fact naming the list", r3.summary())
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())

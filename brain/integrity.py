@@ -38,6 +38,7 @@ class Report:
     duplicates: list[tuple[str, str]] = field(default_factory=list)  # suspiciously similar names, same type
     legacy_tasks: list[str] = field(default_factory=list)
     oversized: list[tuple[str, int]] = field(default_factory=list)   # categories with too many direct children
+    flat_lists: list[tuple[str, int]] = field(default_factory=list)  # a non-category node with that many children: a list, not structure
 
     @property
     def structural(self) -> int:
@@ -48,7 +49,7 @@ class Report:
     @property
     def clean(self) -> bool:
         return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
-                and not self.oversized)
+                and not self.oversized and not self.flat_lists)
 
     def summary(self) -> str:
         bits = []
@@ -63,6 +64,9 @@ class Report:
         if self.duplicates: bits.append(f"{len(self.duplicates)} possible duplicate pair(s)")
         if self.oversized:
             bits.append("oversized: " + ", ".join(f"{n} ({c})" for n, c in self.oversized[:4]) + " (brain subgroup)")
+        if self.flat_lists:
+            bits.append("flat list(s): " + ", ".join(f"{n} ({c})" for n, c in self.flat_lists[:4])
+                        + " (one fact naming the list, not one node per name: brain merge / brain forget)")
         if self.missing_embeddings: bits.append(f"{self.missing_embeddings} node(s) without embeddings (brain reindex)")
         return "; ".join(bits) if bits else "tree intact"
 
@@ -132,6 +136,11 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
     r.oversized = sorted(((nodes[p]["name"], c) for p, c in child_count.items()
                           if nodes[p]["type"] == "category" and c > oversized_threshold),
                          key=lambda x: -x[1])
+    # the same fan-out under an event/org/project is worse: subgroup leaves non-categories
+    # alone, and 17 "sponsor of X" organizations are one fact wearing 17 nodes
+    r.flat_lists = sorted(((nodes[p]["name"], c) for p, c in child_count.items()
+                           if nodes[p]["type"] != "category" and p != ident_id and c > oversized_threshold),
+                          key=lambda x: -x[1])
     # cycles along part_of (single-parent walk from every node; multi-parent nodes follow every parent)
     seen_cycles: set[frozenset] = set()
     for start in nodes:

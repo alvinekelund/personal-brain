@@ -131,6 +131,12 @@ Rules:
   role, a status, a date, a number), re-emit that entity with the attribute in
   its content ("Aalto Triathlon Club": "... Alvin is its Treasurer"); if the
   attribute is durable, also emit it as a `fact` node with that entity as parent.
+- a list of third parties named only in passing (sponsors, vendors, attendees,
+  speakers, references) that the person has no relationship with is ONE `fact`
+  node naming them all ("HackMIT 2026 sponsors": "Diamond: Long Lake, ASUS; Gold:
+  Cursor, Ramp, ...") with the thing they belong to as parent — never one node
+  per name. A party gets its own node only when the text ties it to the person
+  (they applied there, work there, know someone there).
 
 Hierarchy — organise everything into a tree rooted at the person:
 - give every node a "parent": the broader node it belongs under.

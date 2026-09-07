@@ -62,6 +62,9 @@ the user's own wording, in quotes, only when the referent is genuinely unclear.
 - When a message states a new attribute of something already known (a role, a status, \
 a date), state it as that thing's attribute ("Alvin is the Treasurer of the Aalto \
 Triathlon Club"), not as a separate event.
+- A list of third parties mentioned in passing (sponsors, vendors, attendees, speakers) \
+is one fact naming them ("HackMIT 2026's sponsors are X, Y and Z"), never one fact per \
+name; only a party the user is tied to (applied, works there, knows someone) gets its own.
 - The messages are in order. If a later message changes or supersedes an earlier plan, \
 keep ONLY the later state; never record a plan the user has since moved past.
 - If the messages are instructions to an automation (a scheduled task prompt, a workflow), \
