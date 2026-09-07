@@ -243,13 +243,20 @@ class WatermarkTests(CaptureTestCase):
         self.assertIn("NEW TURN", calls[1])
         self.assertNotIn("OLD TURN", calls[1])
 
-    def test_distill_input_capped_to_the_tail(self):
-        msgs = [user_msg(f"message number {i} " + "x" * 500) for i in range(60)]
+    def test_long_sessions_are_distilled_in_windows_not_cut_to_the_tail(self):
+        """A session with more than MAX_USER_CHARS of new text used to send only
+        its last 15k characters to the distiller and then mark all of it as
+        mined — everything said earlier was lost for good."""
+        msgs = [user_msg(f"message number {i} " + "x" * 500) for i in range(60)]   # ~31k chars
         t = transcript(self._tmp, msgs)
         calls = self.fake_llm()
         self.run_hook(t)
-        self.assertLessEqual(len(calls[0]), capture.MAX_USER_CHARS + len(capture.DISTILL_PROMPT) + 100)
-        self.assertIn("message number 59", calls[0])
+        self.assertGreaterEqual(len(calls), 3)                                     # one call per window
+        for c in calls:
+            self.assertLessEqual(len(c), capture.MAX_USER_CHARS + len(capture.DISTILL_PROMPT) + 100)
+        joined = "".join(calls)
+        self.assertIn("message number 0 ", joined)                                  # the head is not lost
+        self.assertIn("message number 59", joined)
 
     def test_failed_distill_is_retried_on_the_next_capture(self):
         t = transcript(self._tmp, [user_msg("z" * 300)])

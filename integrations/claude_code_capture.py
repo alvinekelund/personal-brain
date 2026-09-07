@@ -245,7 +245,15 @@ def _capture():
         return
 
     user = config.get_user() or "the user"
-    facts = llm.generate(DISTILL_PROMPT.format(user=user, messages=new[-MAX_USER_CHARS:])).strip()
+    # window the new text instead of keeping only its tail: a session longer than
+    # MAX_USER_CHARS used to lose everything said before the last 15k characters,
+    # and the watermark then marked all of it as mined
+    parts = []
+    for start in range(0, len(new), MAX_USER_CHARS):
+        out = llm.generate(DISTILL_PROMPT.format(user=user, messages=new[start:start + MAX_USER_CHARS])).strip()
+        if out and not out.upper().startswith("NONE"):
+            parts.append(out)
+    facts = " ".join(parts).strip()
 
     def advance():
         """Mark these turns as mined. Called only once they were actually handled —
