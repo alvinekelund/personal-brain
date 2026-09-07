@@ -54,6 +54,7 @@ FIELD_KEYS = ("due", "owner", "area", "prio", "since", "touched", "next", "done"
 
 STALE_DAYS = 7          # lint warns when an open loop hasn't been touched this long
 WAITING_NAG_DAYS = 5    # lint warns when a waiting-for is older than this
+NEXT_MAX_CHARS = 200    # a next action longer than this is narrative, not a step (one aggregated lint warning)
 
 HEADER = """# LOOPS — open loops
 <!-- Managed by `brain loop` (add / done / edit / list / lint / render). Do NOT hand-edit lines.
@@ -490,6 +491,13 @@ def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
             warnings.append(f"{l.id} untouched for {age}d: {l.title}")
         if l.waiting_on and age > WAITING_NAG_DAYS:
             warnings.append(f"{l.id} waiting on {l.waiting_on} for {age}d — nudge")
+    # one line, not one per loop: 33 of 59 open loops carried a next action over 200
+    # characters on Sep 6 2026 — narrative, with the concrete step buried in it
+    long_next = [l.id for l in ledger.open if len(l.next or "") > NEXT_MAX_CHARS]
+    if long_next:
+        shown = ", ".join(long_next[:3]) + (f", +{len(long_next) - 3} more" if len(long_next) > 3 else "")
+        warnings.append(f"{len(long_next)} loop(s) with a next action over {NEXT_MAX_CHARS} chars ({shown}) — "
+                        f"one concrete step each; the history belongs in the log")
     return errors, warnings
 
 
