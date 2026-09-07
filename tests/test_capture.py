@@ -253,6 +253,27 @@ class WatermarkTests(CaptureTestCase):
         self.run_hook(t)
         self.assertGreaterEqual(len(calls), 1)                                   # the distiller was asked
 
+    def test_watermark_survives_turns_ageing_out_of_the_window(self):
+        """The watermark is a character offset. It used to index the age-filtered
+        text: once an early turn passed 36 h, every later turn shifted forward
+        and the offset pointed past new text (skipped) or into old text
+        (re-mined). Offsets are now counted over every piece, stale or not."""
+        import time as _time
+        now = _time.time()
+        iso = lambda t: _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime(t)) + ".000Z"
+        a = "I moved to Conant Hall 112 on September 1, right next to the Science Center."
+        b = "Anna arrives in Boston on October 10 for a week."
+        t = transcript(self._tmp, [user_msg(a, iso(now - 40 * 3600)), user_msg(b, iso(now - 3600))])
+        pieces = capture.user_pieces(t, now=now)
+        self.assertEqual([stale for _, _, stale in pieces], [True, False])
+        mark = len(a) + len(capture.SEP)                                        # A was mined while fresh
+        new, total = capture.split_new(pieces, mark)
+        self.assertEqual(new, b)                                                # B, once; A not re-mined
+        self.assertEqual(total, len(a) + len(capture.SEP) + len(b) + len(capture.SEP))
+        self.assertEqual(capture.split_new(pieces, total)[0], "")               # nothing new after that
+        big = user_msg("y" * 5000)
+        self.assertEqual(len(capture.user_pieces(transcript(self._tmp, [big]))[0][1]), 5000)   # no 2000-char cut
+
     def test_long_sessions_are_distilled_in_windows_not_cut_to_the_tail(self):
         """A session with more than MAX_USER_CHARS of new text used to send only
         its last 15k characters to the distiller and then mark all of it as

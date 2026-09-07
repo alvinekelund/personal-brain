@@ -32,7 +32,7 @@ from brain import DATA_DIR, config, db, extract, llm
 
 MIN_USER_CHARS = 80        # one declarative sentence is ~100 chars; below this it is "ok thanks"
 MAX_USER_CHARS = 15000     # cap what we send to the distiller
-PER_MESSAGE_CAP = 2000
+PER_MESSAGE_CAP = 20000    # a pasted document is distilled in windows now; 2000 cut every long paste
 LOG_PATH = DATA_DIR / "capture.log"
 STATE_PATH = DATA_DIR / "capture-state.json"
 SEEN_PATH = DATA_DIR / "capture-seen.jsonl"
@@ -162,18 +162,13 @@ def new_facts_only(facts_text: str) -> tuple[list[str], int]:
     return fresh, len(sentences) - len(fresh)
 
 
-def user_text_from_transcript(path: Path, now: float | None = None,
-                              max_age_h: float = MAX_MESSAGE_AGE_H) -> str:
-    """Collect ALL human-typed text from a session transcript (JSONL), in order.
-
-    Tool results, slash-command expansions, and harness-injected reminders all
-    arrive as "user" entries too — skip them; ambient capture must only ever
-    see what the person themselves typed.
-
-    Returns the full text uncapped: the transcript is append-only, so the
-    result only ever grows by appending, and the caller's per-session watermark
-    (a character offset into this text) stays valid across captures.
-    """
+def user_pieces(path: Path, now: float | None = None,
+                max_age_h: float = MAX_MESSAGE_AGE_H) -> list[tuple[float | None, str, bool]]:
+    """Every human-typed piece of a session transcript (JSONL), in order, as
+    (timestamp, text, stale): stale means older than max_age_h — a resumed old
+    session's turns were true days ago, not now. Tool results, slash-command
+    expansions and harness-injected reminders arrive as "user" entries too and
+    are skipped; ambient capture must only ever see what the person typed."""
     pieces = []
     now = now or time.time()
     cutoff = now - max_age_h * 3600
@@ -185,8 +180,6 @@ def user_text_from_transcript(path: Path, now: float | None = None,
         if entry.get("type") != "user" or entry.get("isMeta"):
             continue
         ts = _ts(entry)
-        if ts is not None and ts < cutoff:
-            continue   # a resumed old session: those turns were true days ago, not now
         content = (entry.get("message") or {}).get("content")
         blocks = [content] if isinstance(content, str) else (
             [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
@@ -197,8 +190,30 @@ def user_text_from_transcript(path: Path, now: float | None = None,
             if not text or text.startswith(("<command-", "<local-command", "<system-reminder",
                                             "<task-notification")):
                 continue
-            pieces.append(text[:PER_MESSAGE_CAP])
-    return "\n---\n".join(pieces)
+            pieces.append((ts, text[:PER_MESSAGE_CAP], ts is not None and ts < cutoff))
+    return pieces
+
+
+SEP = "\n---\n"
+
+
+def user_text_from_transcript(path: Path, now: float | None = None,
+                              max_age_h: float = MAX_MESSAGE_AGE_H) -> str:
+    """The fresh human-typed text of a session, joined — what the distiller sees."""
+    return SEP.join(text for _, text, stale in user_pieces(path, now, max_age_h) if not stale)
+
+
+def split_new(pieces: list, mark: int) -> tuple[str, int]:
+    """(new fresh text, total chars) for a watermark `mark` counted over ALL
+    pieces, stale ones included. The transcript is append-only, so counting
+    every piece keeps the offset valid even as early turns age out of the
+    window — filtering first shifted the offset and re-mined or skipped turns."""
+    offset, new = 0, []
+    for _, text, stale in pieces:
+        if offset >= mark and not stale:
+            new.append(text)
+        offset += len(text) + len(SEP)
+    return SEP.join(new), offset
 
 
 def main():
@@ -223,7 +238,8 @@ def _capture():
         log(f"session {session}: skipped (no GEMINI_API_KEY)")
         return
 
-    text = user_text_from_transcript(transcript)
+    pieces = user_pieces(transcript)
+    text = SEP.join(t for _, t, stale in pieces if not stale)
     if is_automation(text):
         log(f"session {session}: skipped (automation session — scheduled task / workflow prompt)")
         return
@@ -236,9 +252,10 @@ def _capture():
     state = load_state()
     rec = state.get(session_id)
     mark = rec.get("chars", 0) if isinstance(rec, dict) else 0
-    if not isinstance(mark, int) or not 0 <= mark <= len(text):
+    new, total = split_new(pieces, mark if isinstance(mark, int) and mark >= 0 else 0)
+    if isinstance(mark, int) and mark > total:
         mark = 0   # transcript replaced or state damaged — re-mine from the start
-    new = text[mark:]
+        new, total = split_new(pieces, 0)
     if len(new) < MIN_USER_CHARS:
         log(f"session {session}: skipped ({len(new)} new chars of user text, "
             f"{mark} already captured)")
@@ -258,7 +275,7 @@ def _capture():
     def advance():
         """Mark these turns as mined. Called only once they were actually handled —
         an LLM/ingest failure leaves the watermark alone so the next end retries."""
-        state[session_id] = {"chars": len(text), "ts": time.time()}
+        state[session_id] = {"chars": total, "ts": time.time()}
         save_state(state)
 
     if not facts or facts.upper().startswith("NONE"):
