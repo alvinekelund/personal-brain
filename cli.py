@@ -614,25 +614,52 @@ def describe(node, content):
 # ── forget ────────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.argument("node_id")
-def forget(node_id):
-    """Immediately archive a node."""
+@click.argument("node")
+def forget(node):
+    """Archive NODE now (id from `brain tree`, or exact name): it leaves answers,
+    the digest and the views, and decay deletes it a week later. Refuses the
+    person, a category, and a node that still has others filed under it."""
     conn = db.connect()
-    db.archive_node(conn, node_id)
+    n = db.get_node(conn, node) or db.get_node_by_name(conn, node)
+    if not n:
+        click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    user = config.get_user()
+    if user and n["name"].lower() == user.lower():
+        click.echo("That is the person this brain is about — it cannot be archived.", err=True)
+        sys.exit(1)
+    if n["type"] == "category":
+        click.echo(f"{n['name']!r} is a category — move or merge what is filed under it first "
+                   "(`brain move`, `brain merge`).", err=True)
+        sys.exit(1)
+    kids = [db.get_node(conn, e["source_id"]) for e in db.edges_for_node(conn, n["id"])
+            if e["target_id"] == n["id"] and e["relation"] == "part_of"]
+    kids = [k["name"] for k in kids if k and not k["archived"]]
+    if kids:
+        click.echo(f"{len(kids)} node(s) are filed under {n['name']!r} ({', '.join(kids[:4])}"
+                   f"{'…' if len(kids) > 4 else ''}) — move them first (`brain move`).", err=True)
+        sys.exit(1)
+    db.archive_node(conn, n["id"])
     conn.commit()
-    click.echo(f"Archived {node_id}.")
+    vault.auto_render(conn, user)
+    click.echo(f"Archived {n['name']!r} ({n['type']}).")
 
 
 # ── reinforce ─────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.argument("node_id")
-def reinforce(node_id):
-    """Manually boost a node's weight to 1.0."""
+@click.argument("node")
+def reinforce(node):
+    """Boost NODE's weight to 1.0 (id or exact name) — the same as an access; the
+    freshness boost propagates up its branch."""
     conn = db.connect()
-    db.touch_node(conn, node_id)
+    n = db.get_node(conn, node) or db.get_node_by_name(conn, node)
+    if not n:
+        click.echo("Node not found — use an id from `brain tree` or the exact name.", err=True)
+        sys.exit(1)
+    db.touch_node(conn, n["id"])
     conn.commit()
-    click.echo(f"Reinforced {node_id}.")
+    click.echo(f"Reinforced {n['name']!r}: weight 1.0.")
 
 
 # ── export / import ─────────────────────────────────────────────────────────────

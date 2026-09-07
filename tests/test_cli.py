@@ -128,3 +128,26 @@ class CliTests(BrainTestCase):
             self.assertEqual(len((doctor.DATA_DIR / "brief.log").read_text().strip().splitlines()), 2)
         finally:
             doctor.DATA_DIR = orig
+
+    def test_forget_and_reinforce_by_name_with_tree_guards(self):
+        self.conn.execute("UPDATE nodes SET weight = 0.4 WHERE id = ?", (self.padel,))
+        self.conn.commit()
+        r = self.run_cli("reinforce", "Padel")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(db.get_node(self.conn, self.padel)["weight"], 1.0)
+        for target, why in (("Alvin", "cannot be archived"), ("Hobbies", "is a category"), ("Nope", "not found")):
+            r = self.run_cli("forget", target)
+            self.assertEqual(r.exit_code, 1, target)
+            self.assertIn(why, r.output)
+        child = db.add_node(self.conn, "Padel racket", type_="artifact")
+        db.add_edge(self.conn, child, self.padel, "part_of")
+        self.conn.commit()
+        r = self.run_cli("forget", "Padel")                              # has a child filed under it
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("filed under 'Padel'", r.output)
+        r = self.run_cli("forget", "Padel racket")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(db.get_node(self.conn, child)["archived"], 1)
+        r = self.run_cli("forget", "Padel")                              # child archived: now allowed
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)

@@ -169,8 +169,8 @@ brain prune                      # delete archived nodes
 brain clear                      # erase the entire brain (asks to confirm; -y to skip)
 
 # Manual ops
-brain reinforce <node-id>        # boost weight to 1.0
-brain forget <node-id>           # immediately archive
+brain reinforce <node>           # boost weight to 1.0 (id or exact name)
+brain forget <node>              # archive now (never the person, a category, or a node with children)
 brain merge <id1> <id2>          # merge id2 into id1 (keeps one parent, takes the higher importance)
 brain move <node> <parent>       # re-home a node (ids or exact names); no cycles, categories only under you
 brain rename <node> <new-name>   # rename in place (refuses a name another node carries — merge instead)
