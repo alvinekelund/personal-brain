@@ -150,6 +150,20 @@ class OperationTests(LoopsTestCase):
         with self.assertRaises(loops.LoopError):
             loops.edit(self.root, "L-001", today=later, commit=False)
 
+    def test_touch_bumps_touched_only(self):
+        """Regression: touch() routed through edit(touched=...), which sets
+        `touched` itself, so replace() got the keyword twice and `brain loop
+        touch` raised TypeError on every call."""
+        self.add()
+        later = date(2026, 9, 5)
+        l = loops.touch(self.root, "L-001", today=later, commit=False)
+        self.assertEqual(l.touched, later)
+        self.assertEqual((l.title, l.due, l.next), ("Lock fourth seat", date(2026, 9, 9), "click Enroll Selected"))
+        self.assertEqual(loops.load(self.root).open[0].touched, later)
+        loops.done(self.root, "L-001", today=later, commit=False)
+        with self.assertRaises(loops.LoopError):
+            loops.touch(self.root, "L-001", today=later, commit=False)
+
     def test_ids_never_reused_after_close(self):
         self.add()
         loops.done(self.root, "L-001", today=TODAY, commit=False)
@@ -290,6 +304,26 @@ class InboxTests(LoopsTestCase):
 
     def test_missing_vault_dir_is_a_noop(self):
         self.assertEqual(loops.inbox_add(Path(tempfile.mkdtemp()) / "nope", ["x"], today=TODAY), 0)
+
+    def test_stalled_loops_are_named_on_the_card_and_in_the_brief(self):
+        """Weekly review 2026-W36: six overdue loops were last touched on their
+        opening day and looked, on the card, exactly like loops being worked.
+        A due/overdue loop untouched for STALE_DAYS+ days is marked and listed;
+        a touched one, or one waiting on someone, is not."""
+        self.add("Send the instructor emails", "2026-09-02", "alvin", "harvard", "send them")      # L-001
+        self.add("Ask Protopapas", "2026-09-03", "alvin", "harvard", "send the draft")           # L-002
+        self.add("Boaz reply", "2026-09-05", "waiting:boaz", "harvard", "nudge")                 # L-003, waiting
+        later = date(2026, 9, 6)
+        loops.touch(self.root, "L-002", today=later, commit=False)                                # worked on today
+        card = loops.today_report(self.root, later)
+        self.assertIn("L-001 P2 Send the instructor emails [untouched 5d]", card)
+        self.assertNotIn("Ask Protopapas [untouched", card)
+        self.assertNotIn("Boaz reply [untouched", card)
+        self.assertIn("STALLED (1 due/overdue, untouched 3+ days", card)
+        self.assertIn("L-001 5d", card)
+        self.assertNotIn("STALLED", loops.today_report(self.root, date(2026, 9, 2)))              # a day later: not yet
+        b = loops.brief(self.root, later)
+        self.assertTrue(b.startswith("Send the instructor emails (overdue 4d, untouched 5d)"), b)
 
     def test_today_surfaces_inbox(self):
         self.add()

@@ -381,7 +381,18 @@ def edit(root: Path, lid: str, today: date | None = None, commit: bool = True,
 
 
 def touch(root: Path, lid: str, today: date | None = None, commit: bool = True) -> Loop:
-    return edit(root, lid, today=today, commit=commit, touched=today or date.today())
+    """Mark an open loop as reviewed today without changing it: bumps `touched`
+    only. (It used to route through edit(touched=...), which sets `touched`
+    itself - `replace()` got the keyword twice and `brain loop touch` raised.)"""
+    today = today or date.today()
+    ledger = load(root)
+    loop = ledger.get(lid)
+    if loop.closed:
+        raise LoopError(f"{lid} is closed — reopen by adding a new loop")
+    updated = replace(loop, touched=today)
+    ledger.open[ledger.open.index(loop)] = updated
+    _finish(root, ledger, f"loop {lid}: touched", commit)
+    return updated
 
 
 # ── NOW.md view ───────────────────────────────────────────────────────────────
@@ -487,6 +498,23 @@ def search(root: Path, query: str, limit: int = 5, include_closed: bool = False)
 
 # ── today ─────────────────────────────────────────────────────────────────────
 
+CARD_STALE_DAYS = 3   # the action card marks a due/overdue loop nobody has edited for this long (lint's STALE_DAYS is 7)
+
+
+def _untouched_days(l: "Loop", today: date):
+    """Days since the loop was last edited (touched, else opened); None if unknown."""
+    ref = l.touched or l.since
+    return (today - ref).days if ref else None
+
+
+def _stale(l: "Loop", today: date) -> int | None:
+    """The untouched-days figure when it marks a stall (>= STALE_DAYS, not waiting on someone)."""
+    if l.waiting_on:
+        return None
+    n = _untouched_days(l, today)
+    return n if n is not None and n >= CARD_STALE_DAYS else None
+
+
 def _rel(d: date, today: date) -> str:
     n = (d - today).days
     if n < 0:
@@ -510,7 +538,15 @@ def today_report(root: Path, today: date | None = None, horizon: int = 7,
     due = [l for l in open_ if (l.due - today).days <= horizon]
     out.append(f"\nDUE (overdue → next {horizon}d):" if due else f"\nDUE: nothing in the next {horizon} days")
     for l in due:
-        out.append(f"  {l.due.strftime('%b %d')} {_rel(l.due, today):>10}  {l.id} P{l.prio} {l.title} → {l.next}")
+        st = _stale(l, today)
+        mark = f" [untouched {st}d]" if st is not None else ""
+        out.append(f"  {l.due.strftime('%b %d')} {_rel(l.due, today):>10}  {l.id} P{l.prio} {l.title}{mark} → {l.next}")
+    stalled = [l for l in due if _stale(l, today) is not None]
+    if stalled:
+        # the weekly review found overdue loops untouched since their opening day,
+        # indistinguishable on the card from loops being worked — name them
+        out.append(f"\nSTALLED ({len(stalled)} due/overdue, untouched {CARD_STALE_DAYS}+ days — no edit, no touch): "
+                   + ", ".join(f"{l.id} {_stale(l, today)}d" for l in stalled))
     waiting = [l for l in open_ if l.waiting_on]
     if waiting:
         out.append("\nWAITING ON:")
@@ -550,6 +586,9 @@ def brief(root: Path, today: date | None = None, limit: int = 200) -> str:
     for l in open_:
         n = (l.due - today).days
         when = "today" if n == 0 else (f"overdue {-n}d" if n < 0 else f"{n}d")
+        st = _stale(l, today)
+        if st is not None:
+            when += f", untouched {st}d"
         head = f"{l.title} ({when})"
         sep = " · " if text else ""
         if text and len(text) + len(sep) + len(head) > limit:
