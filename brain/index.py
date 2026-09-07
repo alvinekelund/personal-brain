@@ -311,7 +311,7 @@ def build(conn, root: Path, embed: bool = True) -> dict:
     a key). Returns counts."""
     root = Path(root)
     ensure_schema(conn)
-    existing = {r["path"]: r for r in conn.execute("SELECT path, sha, embedding FROM vault_files")}
+    existing = {r["path"]: r for r in conn.execute("SELECT path, sha, embedding, kind FROM vault_files")}
     now = time.time()
     stats = {"files": 0, "added": 0, "updated": 0, "removed": 0, "unchanged": 0,
              "links": 0, "node_links": 0, "embedded": 0, "no_frontmatter": []}
@@ -327,6 +327,10 @@ def build(conn, root: Path, embed: bool = True) -> dict:
         old = existing.get(rec["path"])
         if old and old["sha"] == rec["sha"]:
             stats["unchanged"] += 1
+            if old["kind"] != rec["kind"]:
+                # derived, not read from the file: when the rule changes (apps/ files
+                # became "app" on Sep 6 2026) an unchanged file kept its old kind
+                conn.execute("UPDATE vault_files SET kind = ? WHERE path = ?", (rec["kind"], rec["path"]))
             if embed and not old["embedding"]:
                 to_embed.append(rec)
             continue

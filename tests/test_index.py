@@ -204,6 +204,18 @@ class BuildTests(IndexTestCase):
         index.build(self.conn, self.root, embed=False)
         self.assertIsNone(db.get_node(self.conn, cat)["path"])                  # structure has no file
 
+    def test_unchanged_files_still_get_a_recomputed_kind(self):
+        """kind is derived from the path, not read from the file: when the rule
+        changed (apps/ files became 'app') every unchanged file kept the old
+        value, so search priorities and index-page discounts ran on stale kinds."""
+        w(self.root / "apps/deck.md", "---\napp: deck\nname: Deck\ntype: artifact\nupdated: 2026-09-05\n---\n# Deck\n- launcher\n")
+        index.build(self.conn, self.root, embed=False)
+        self.conn.execute("UPDATE vault_files SET kind = 'artifact' WHERE path = 'apps/deck.md'")   # a stale rule's value
+        self.conn.commit()
+        s = index.build(self.conn, self.root, embed=False)
+        self.assertGreater(s["unchanged"], 0)
+        self.assertEqual(self.conn.execute("SELECT kind FROM vault_files WHERE path = 'apps/deck.md'").fetchone()[0], "app")
+
     def test_qualified_node_name_links_by_its_bare_name(self):
         w(self.root / "projects/walkthrough.md",
           "---\ntype: project\nname: Walkthrough, Junction 2025 (Top 5 overall, 2nd Snap Spectacles track)\n"
