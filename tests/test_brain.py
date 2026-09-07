@@ -886,6 +886,22 @@ class ServerApiTests(BrainTestCase):
         self.assertIn("fading", out)
         self.assertGreaterEqual(out["stats"]["total"], 1)
 
+    def test_api_ask_carries_the_cited_line(self):
+        from brain import server
+        self.assertEqual(server.api_ask(self.conn, ""), {"answer": "", "sources": [], "cited": [], "line": ""})
+        db.add_node(self.conn, "Football", type_="concept", content="Alvin plays football on Sundays.")
+        self.conn.commit()
+        orig = llm.generate
+        llm.generate = lambda *a, **k: "On Sundays (Football)."
+        try:
+            out = server.api_ask(self.conn, "when does he play football")
+        finally:
+            llm.generate = orig
+        self.assertEqual(out["cited"], ["Football"])
+        self.assertTrue(out["line"].startswith("cited: Football"))
+        from pathlib import Path as _P
+        self.assertIn("src=j.line||", _P(server.__file__).read_text(encoding="utf-8"))
+
     def test_web_page_renders_the_node_path(self):
         from brain import server
         from pathlib import Path as _P

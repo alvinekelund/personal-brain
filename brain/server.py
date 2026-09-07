@@ -47,7 +47,11 @@ def _path(r) -> str:
 
 
 def api_ask(conn, q, history=None):
-    return graph.answer_question(conn, q, history=history) if q else {"answer": "", "sources": []}
+    if not q:
+        return {"answer": "", "sources": [], "cited": [], "line": ""}
+    res = graph.answer_question(conn, q, history=history)
+    res["line"] = graph.sources_line(res)     # the page shows what was cited, like the CLI and the MCP tool
+    return res
 
 
 def api_context(conn, topic):
@@ -183,7 +187,7 @@ function renderChat(){ show('Ask', chat.map(c=>'<b>Q:</b> '+esc(c.q)+'<br><b>A:<
 async function bAsk(){const q=$('askin').value.trim();if(!q)return;$('askin').value='';
  chat.push({q:q,a:'thinking…',src:''}); renderChat();
  try{ const j=await (await fetch('/ask',{method:'POST',body:JSON.stringify({q:q,history:chat.slice(0,-1).map(c=>({q:c.q,a:c.a}))})})).json();
-   chat[chat.length-1].a=j.answer; chat[chat.length-1].src=(j.sources||[]).join(', '); }
+   chat[chat.length-1].a=j.answer; chat[chat.length-1].src=j.line||(j.sources||[]).join(', '); }
  catch(e){ chat[chat.length-1].a='error'; } renderChat(); }
 async function bSynth(){show('Synthesize','working…');const j=await (await fetch('/synthesize',{method:'POST'})).json();
  show('Synthesize',(j.made||[]).map(m=>'• '+esc(m.source)+' --'+m.relation+'--> '+esc(m.target)).join('\\n')||'(no new links)');setTimeout(refresh,700);}
