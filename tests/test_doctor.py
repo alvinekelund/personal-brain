@@ -46,6 +46,10 @@ class DoctorTests(unittest.TestCase):
         conn.close()
         self._orig_have_key = llm.have_key
         llm.have_key = lambda: True
+        import brain.config as config                          # the doctor reads the owner from config:
+        self._orig_config_path = config.CONFIG_PATH            # CI has no ~/.personal-brain/config.json, so
+        config.CONFIG_PATH = self.tmp / "config.json"          # without this the tree checks see no root
+        config.save({"user": "Alvin"})
         self.settings = self.tmp / "settings.json"
         self.settings.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [
             {"type": "command", "command": f"{self.bin} today"}]}]}}))
@@ -63,6 +67,8 @@ class DoctorTests(unittest.TestCase):
         (self.tasks / "nightly" / "SKILL.md").write_text(f"run {self.bin} add \"fact\"\n")
 
     def tearDown(self):
+        import brain.config as config
+        config.CONFIG_PATH = self._orig_config_path
         db.DB_PATH = self._orig_db_path
         llm.have_key = self._orig_have_key
 
