@@ -345,7 +345,11 @@ def check_vault(root: Path, today: date | None = None, now: float | None = None)
         if errors:
             out.append(Check("loops", "fail", f"{n_open} open · {len(errors)} lint error(s): " + "; ".join(errors[:3])))
         elif warnings:
-            out.append(Check("loops", "warn", f"{n_open} open · " + "; ".join(warnings[:3])))
+            # ids and reasons only: the titles sit on the card right below, and three
+            # of them made the session-start line 320 characters
+            heads = [w.split(": ", 1)[0] for w in warnings[:3]]
+            more = f", +{len(warnings) - 3} more" if len(warnings) > 3 else ""
+            out.append(Check("loops", "warn", f"{n_open} open · {len(warnings)} warning(s): " + ", ".join(heads) + more))
         else:
             out.append(Check("loops", "ok", f"{n_open} open · lint clean"))
 

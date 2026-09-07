@@ -247,6 +247,16 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Move to Boston (91d, 'plans to')", c.detail)
         self.assertIn("brain stale", c.detail)
 
+    def test_loops_warning_detail_is_ids_and_reasons_not_titles(self):
+        """Three overdue titles made the session-start line 320 characters; the
+        card lists the titles right below, so the health line keeps ids only."""
+        for i in range(5):
+            loops.add(self.root, f"A long loop title number {i} that says a lot", "2026-08-30", "alvin", "jobs", "n", today=TODAY, commit=False)   # touched today: overdue only
+        c = by_name(self.run_doctor())["loops"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("5 open · 5 warning(s): L-001 overdue by 2d, L-002 overdue by 2d, L-003 overdue by 2d, +2 more", c.detail)
+        self.assertNotIn("long loop title", c.detail)
+
     def test_capture_line_tallies_the_week(self):
         """The weekly review counted '14 sessions ingested, 25 skipped' by hand
         from capture.log; the doctor line now carries the 7-day tally."""
