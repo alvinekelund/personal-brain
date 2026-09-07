@@ -225,6 +225,10 @@ def main():
     """Run the capture; never raises — a hook must not disturb session exit."""
     try:
         _capture()
+    except (llm.BudgetExceeded, TimeoutError, OSError) as e:
+        # the network or the API, not the hook: nothing was mined, the watermark
+        # stayed, the next session end retries — a warning, not a failure
+        log(f"deferred ({type(e).__name__}: {str(e)[:80]}) — the API did not answer; the next capture retries")
     except Exception as e:
         log(f"error: {type(e).__name__}: {e}")
 

@@ -220,6 +220,8 @@ def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None =
             age_h = None
     if recent_err and recent_err[-1] == last:
         return Check("capture", "fail", f"last run failed: {last[20:140]}")
+    if ": deferred (" in last:
+        return Check("capture", "warn", f"last run deferred (API did not answer) — retried at the next session end: {last[20:120]}")
     tail = last[20:110] + capture_tally(Path(log_path), now)
     if age_h is not None and age_h > 72:
         return Check("capture", "warn", f"last run {age_h:.0f}h ago: {tail}")

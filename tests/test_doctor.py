@@ -273,6 +273,12 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("5 open · 5 warning(s): L-001 overdue by 2d, L-002 overdue by 2d, L-003 overdue by 2d, +2 more", c.detail)
         self.assertNotIn("long loop title", c.detail)
 
+    def test_deferred_capture_warns_not_fails(self):
+        self.capture_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " session ab12: deferred (BudgetExceeded: 120s budget) — the API did not answer; the next capture retries\n")
+        c = by_name(self.run_doctor())["capture"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("retried at the next session end", c.detail)
+
     def test_capture_line_tallies_the_week(self):
         """The weekly review counted '14 sessions ingested, 25 skipped' by hand
         from capture.log; the doctor line now carries the 7-day tally."""

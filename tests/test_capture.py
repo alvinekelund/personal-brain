@@ -309,6 +309,18 @@ class WatermarkTests(CaptureTestCase):
         self.assertIn("message number 0 ", joined)                                  # the head is not lost
         self.assertIn("message number 59", joined)
 
+    def test_api_trouble_is_deferred_not_an_error(self):
+        """With the Gemini endpoint degraded on Sep 6 2026 a distill would have
+        raised BudgetExceeded and the doctor would have shown a red 'last run
+        failed' for a transient network problem."""
+        llm.have_key = lambda: True
+        llm.generate = lambda *a, **k: (_ for _ in ()).throw(llm.BudgetExceeded("120s budget exhausted"))
+        t = transcript(self._tmp, [user_msg("x" * 300)])
+        self.run_hook(t)
+        self.assertIn("deferred (BudgetExceeded", self.log_text())
+        self.assertNotIn("error:", self.log_text())
+        self.assertEqual(capture.load_state(), {})                      # nothing marked as mined: retried next time
+
     def test_failed_distill_is_retried_on_the_next_capture(self):
         t = transcript(self._tmp, [user_msg("z" * 300)])
         llm.have_key = lambda: True
