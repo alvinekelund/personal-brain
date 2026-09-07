@@ -39,6 +39,7 @@ class Report:
     legacy_tasks: list[str] = field(default_factory=list)
     oversized: list[tuple[str, int]] = field(default_factory=list)   # categories with too many direct children
     flat_lists: list[tuple[str, int]] = field(default_factory=list)  # a non-category node with that many children: a list, not structure
+    thin_areas: list[tuple[str, int]] = field(default_factory=list)  # top-level categories with that few descendants
 
     @property
     def structural(self) -> int:
@@ -49,7 +50,7 @@ class Report:
     @property
     def clean(self) -> bool:
         return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
-                and not self.oversized and not self.flat_lists)
+                and not self.oversized and not self.flat_lists and not self.thin_areas)
 
     def summary(self) -> str:
         bits = []
@@ -67,6 +68,9 @@ class Report:
         if self.flat_lists:
             bits.append("flat list(s): " + ", ".join(f"{n} ({c})" for n, c in self.flat_lists[:4])
                         + " (one fact naming the list, not one node per name: brain merge / brain forget)")
+        if self.thin_areas:
+            bits.append("thin area(s): " + ", ".join(f"{n} ({c})" for n, c in self.thin_areas[:4])
+                        + " (a sub-category or a duplicate of a broader area: brain move <area> <broader> / brain merge <broader> <area>)")
         if self.missing_embeddings: bits.append(f"{self.missing_embeddings} node(s) without embeddings (brain reindex)")
         return "; ".join(bits) if bits else "tree intact"
 
@@ -88,6 +92,10 @@ _DANGLING_WHERE = (
     "WHERE NOT EXISTS (SELECT 1 FROM nodes WHERE nodes.id = edges.source_id)"
     " OR NOT EXISTS (SELECT 1 FROM nodes WHERE nodes.id = edges.target_id)"
 )
+
+
+THIN_AREA_MAX = 2          # a top-level area with this many descendants or fewer is thin
+THIN_AREA_MIN_GRAPH = 20   # ...once the graph has this many non-category nodes (a young brain is just small)
 
 
 def check(conn, user: str = "", oversized_threshold: int | None = None) -> Report:
@@ -141,6 +149,26 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
     r.flat_lists = sorted(((nodes[p]["name"], c) for p, c in child_count.items()
                            if nodes[p]["type"] != "category" and p != ident_id and c > oversized_threshold),
                           key=lambda x: -x[1])
+    # a top-level area with almost nothing under it, in a graph that has had time
+    # to fill, is a sub-category that got rooted ("Family" beside "Relationships")
+    # or an empty template area ("Health"): sprawl the planner is told to avoid
+    if ident_id and sum(1 for n in nodes.values() if n["type"] != "category") >= THIN_AREA_MIN_GRAPH:
+        children: dict[str, list[str]] = {}
+        for nid, ps in parents.items():
+            for p in ps:
+                children.setdefault(p, []).append(nid)
+
+        def descendants(nid: str, seen: set) -> int:
+            total = 0
+            for c in children.get(nid, []):
+                if c not in seen:
+                    seen.add(c)
+                    total += 1 + descendants(c, seen)
+            return total
+        r.thin_areas = sorted(((nodes[c]["name"], descendants(c, {c}))
+                               for c in children.get(ident_id, []) if nodes[c]["type"] == "category"
+                               and descendants(c, {c}) <= THIN_AREA_MAX),
+                              key=lambda x: (x[1], x[0]))
     # cycles along part_of (single-parent walk from every node; multi-parent nodes follow every parent)
     seen_cycles: set[frozenset] = set()
     for start in nodes:

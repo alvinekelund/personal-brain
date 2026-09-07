@@ -55,6 +55,10 @@ class IntegrityTests(BrainTestCase):
         hack = db.add_node(c, "HackMIT", type_="event"); db.add_edge(c, hack, career, "part_of")
         for name in ("Long Lake", "ASUS", "Cursor", "Ramp"):
             nid = db.add_node(c, name, type_="organization"); db.add_edge(c, nid, hack, "part_of")
+        # an empty template area and a one-node area beside the broad ones: thin
+        health = db.add_node(c, "Health", type_="category"); db.add_edge(c, health, me, "part_of")
+        fam = db.add_node(c, "Family", type_="category"); db.add_edge(c, fam, me, "part_of")
+        gp = db.add_node(c, "Alvin's Grandfather", type_="person"); db.add_edge(c, gp, fam, "part_of")
         c.commit()
 
     def test_check_reports_every_problem(self):
@@ -82,6 +86,9 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r3.flat_lists, [("HackMIT", 4)])                          # not in oversized: subgroup can't split it
         self.assertNotIn("HackMIT", [n for n, _ in r3.oversized])
         self.assertIn("flat list(s): HackMIT (4) (one fact naming the list", r3.summary())
+        self.assertEqual(r.thin_areas, [("Health", 0), ("Family", 1)])          # Education/Career are broad; Hobbies is unrooted
+        self.assertIn("thin area(s): Health (0), Family (1)", r.summary())
+        self.assertIn("brain move <area> <broader>", r.summary())
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())
@@ -132,6 +139,7 @@ class IntegrityTests(BrainTestCase):
         r = integrity.check(self.conn, "Alvin")
         self.assertTrue(r.clean, r.summary())
         self.assertEqual(r.summary(), "tree intact")
+        self.assertEqual(r.thin_areas, [])        # one area with one node: a young brain, not sprawl
 
     def test_norm_ignores_possessives(self):
         self.assertEqual(integrity._norm("Alvin's Girlfriend"), "girlfriend")

@@ -120,7 +120,7 @@ def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
         return Check("graph-tree", "fail", f"cannot read graph: {e}")
     if rep.structural or rep.legacy_tasks:
         return Check("graph-tree", "fail", rep.summary() + " — `brain doctor --repair`")
-    if rep.duplicates or rep.missing_embeddings or rep.oversized or rep.flat_lists:
+    if rep.duplicates or rep.missing_embeddings or rep.oversized or rep.flat_lists or rep.thin_areas:
         detail = rep.summary()
         if rep.duplicates:
             detail += ": " + "; ".join(f"{a} ~ {b}" for a, b in rep.duplicates[:3]) + " (brain merge)"
