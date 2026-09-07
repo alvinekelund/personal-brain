@@ -217,10 +217,51 @@ def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None =
             age_h = None
     if recent_err and recent_err[-1] == last:
         return Check("capture", "fail", f"last run failed: {last[20:140]}")
-    tail = last[20:110]
+    tail = last[20:110] + capture_tally(Path(log_path), now)
     if age_h is not None and age_h > 72:
         return Check("capture", "warn", f"last run {age_h:.0f}h ago: {tail}")
     return Check("capture", "ok", f"last run {age_h:.0f}h ago: {tail}" if age_h is not None else tail)
+
+
+CAPTURE_TALLY_DAYS = 7
+
+
+def capture_tally(log_path: Path, now: float | None = None, days: int = CAPTURE_TALLY_DAYS) -> str:
+    """' · 7d: 14 ingested, 3 nothing durable, 25 skipped' — the weekly review
+    counted these by hand from capture.log; a run of 'nothing durable' with no
+    ingest at all is the distiller failing quietly, and this makes it visible."""
+    import re
+    now = now or time.time()
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    since = now - days * 86400
+    ingested = durable_none = skipped = failed = 0
+    for l in lines:
+        m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", l)
+        if not m:
+            continue
+        try:
+            t = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            continue
+        if t < since:
+            continue
+        if ": ingested" in l:
+            ingested += 1
+        elif "nothing durable" in l:
+            durable_none += 1
+        elif ": skipped" in l:
+            skipped += 1
+        elif " error:" in l:
+            failed += 1
+    if not (ingested or durable_none or skipped or failed):
+        return ""
+    bits = [f"{ingested} ingested", f"{durable_none} nothing durable", f"{skipped} skipped"]
+    if failed:
+        bits.append(f"{failed} failed")
+    return f" · {days}d: " + ", ".join(bits)
 
 
 BRIEF_MAX_AGE_H = 30   # the morning brief runs daily; older than this and it did not run or did not record

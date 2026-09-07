@@ -247,6 +247,22 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Move to Boston (91d, 'plans to')", c.detail)
         self.assertIn("brain stale", c.detail)
 
+    def test_capture_line_tallies_the_week(self):
+        """The weekly review counted '14 sessions ingested, 25 skipped' by hand
+        from capture.log; the doctor line now carries the 7-day tally."""
+        stamp = lambda h: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - h * 3600))
+        self.capture_log.write_text("\n".join([
+            f"{stamp(300)} session old: ingested 1 node(s)",                       # outside the window
+            f"{stamp(100)} session a: ingested 2 node(s), 3 edge(s)",
+            f"{stamp(50)} session b: nothing durable",
+            f"{stamp(40)} session c: skipped (automation session)",
+            f"{stamp(30)} session d: error: RuntimeError: boom",
+            f"{stamp(1)} session e: skipped (0 new chars of user text)",
+        ]) + "\n")
+        c = by_name(self.run_doctor())["capture"]
+        self.assertEqual(c.status, "ok")
+        self.assertIn("7d: 1 ingested, 1 nothing durable, 2 skipped, 1 failed", c.detail)
+
     def test_category_cross_links_warn_not_pass(self):
         """8 'relates_to <category>' edges showed under a green graph-tree line
         on Sep 6 2026: the summary named them, the status did not."""
