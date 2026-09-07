@@ -43,6 +43,7 @@ class Report:
     oversized: list[tuple[str, int]] = field(default_factory=list)   # categories with too many direct children
     flat_lists: list[tuple[str, int]] = field(default_factory=list)  # a non-category node with that many children: a list, not structure
     thin_areas: list[tuple[str, int]] = field(default_factory=list)  # top-level categories with that few descendants
+    fact_parents: list[tuple[str, list[str]]] = field(default_factory=list)  # a fact with children: a leaf used as a container
 
     @property
     def structural(self) -> int:
@@ -53,7 +54,8 @@ class Report:
     @property
     def clean(self) -> bool:
         return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
-                and not self.oversized and not self.flat_lists and not self.thin_areas)
+                and not self.oversized and not self.flat_lists and not self.thin_areas
+                and not self.fact_parents)
 
     def summary(self) -> str:
         bits = []
@@ -71,6 +73,10 @@ class Report:
         if self.flat_lists:
             bits.append("flat list(s): " + ", ".join(f"{n} ({c})" for n, c in self.flat_lists[:4])
                         + " (one fact naming the list, not one node per name: brain merge / brain forget)")
+        if self.fact_parents:
+            bits.append(f"{len(self.fact_parents)} fact(s) used as a parent: "
+                        + ", ".join(f"{n} ← {', '.join(c[:3])}" for n, c in self.fact_parents[:3])
+                        + " (a fact is a leaf: brain move the children to the entity the fact is about)")
         if self.thin_areas:
             bits.append("thin area(s): " + ", ".join(f"{n} ({c})" for n, c in self.thin_areas[:4])
                         + " (a sub-category or a duplicate of a broader area: brain move <area> <broader> / brain merge <broader> <area>)")
@@ -188,6 +194,15 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
                         r.duplicates.append(pair)
                         listed.add(frozenset(pair))
     r.semantic_duplicates.sort(key=lambda x: -x[2])
+    # a fact is an attribute — a leaf by design ("also emit it as a fact node with
+    # that entity as parent"); one with children is being used as a container
+    # ("Alvin's computer" filed under the fact "Alvin's Residence (US)")
+    kids_of: dict[str, list[str]] = {}
+    for nid, ps in parents.items():
+        for p in ps:
+            kids_of.setdefault(p, []).append(nodes[nid]["name"])
+    r.fact_parents = sorted(((nodes[p]["name"], sorted(cs)) for p, cs in kids_of.items()
+                             if nodes[p]["type"] == "fact"), key=lambda x: x[0])
     # a top-level area with almost nothing under it, in a graph that has had time
     # to fill, is a sub-category that got rooted ("Family" beside "Relationships")
     # or an empty template area ("Health"): sprawl the planner is told to avoid

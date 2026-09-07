@@ -55,6 +55,9 @@ class IntegrityTests(BrainTestCase):
         hack = db.add_node(c, "HackMIT", type_="event"); db.add_edge(c, hack, career, "part_of")
         for name in ("Long Lake", "ASUS", "Cursor", "Ramp"):
             nid = db.add_node(c, name, type_="organization"); db.add_edge(c, nid, hack, "part_of")
+        # a fact used as a container: the computer filed under a residence fact
+        home = db.add_node(c, "Alvin's Residence (US)", type_="fact"); db.add_edge(c, home, career, "part_of")
+        pc = db.add_node(c, "Alvin's computer", type_="artifact"); db.add_edge(c, pc, home, "part_of")
         # an empty template area and a one-node area beside the broad ones: thin
         health = db.add_node(c, "Health", type_="category"); db.add_edge(c, health, me, "part_of")
         fam = db.add_node(c, "Family", type_="category"); db.add_edge(c, fam, me, "part_of")
@@ -89,6 +92,9 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r.thin_areas, [("Health", 0), ("Family", 1)])          # Education/Career are broad; Hobbies is unrooted
         self.assertIn("thin area(s): Health (0), Family (1)", r.summary())
         self.assertIn("brain move <area> <broader>", r.summary())
+        self.assertEqual(r.fact_parents, [("Alvin's Residence (US)", ["Alvin's computer"]),
+                                          ("MIT identity", ["Life Events"])])           # the mis-rooted category counts too
+        self.assertIn("1 fact(s) used as a parent: Alvin's Residence (US) ← Alvin's computer (a fact is a leaf", r.summary())
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())
