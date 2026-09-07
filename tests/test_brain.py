@@ -1013,13 +1013,15 @@ class RedactionTests(BrainTestCase):
         secrets'. Every ingest path now masks it first."""
         db.ensure_identity_anchor(self.conn, "Alvin")
         seen = {}
-        orig = llm.generate
+        orig = (llm.generate, llm.embed, llm.have_key)
         llm.generate = lambda p, *a, **k: (seen.setdefault("p", p), "{}")[1]
+        llm.embed = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))   # no network in tests
+        llm.have_key = lambda: False
         try:
             extract.ingest(self.conn, "My key: export GEMINI_API_KEY=AIzaSyD-1234567890abcdefghijklmnop for the brain.",
                            user="Alvin", inbox_root=False)
         finally:
-            llm.generate = orig
+            llm.generate, llm.embed, llm.have_key = orig
         self.assertNotIn("AIzaSyD", seen["p"])
         self.assertIn("[redacted]", seen["p"])
         logged = self.conn.execute("SELECT raw_text FROM ingestion_log ORDER BY ingested_at DESC LIMIT 1").fetchone()
