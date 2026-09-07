@@ -193,6 +193,7 @@ class CliTests(BrainTestCase):
             llm.have_key, llm.generate, llm.embed = orig
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertIn("[event] Padel Tuesdays → under Hobbies", r.output)
+        self.assertRegex(db.get_node_by_name(self.conn, "Padel Tuesdays")["source"], r"^brain add \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")   # provenance by default
 
     def test_today_snapshots_when_the_newest_backup_is_stale(self):
         import os, tempfile, time

@@ -173,6 +173,16 @@ class ToolCallTests(MCPTestCase):
         result = call_tool("brain_remember", {"text": "I started learning Rust"})
         self.assertIn("brain setup", _json.dumps(result, ensure_ascii=False))
 
+    def test_remember_without_a_source_records_when_it_arrived(self):
+        llm.generate = lambda *a, **k: json.dumps({
+            "nodes": [{"name": "Go", "type": "skill", "content": "Learning Go.", "confidence": 0.9, "importance": 0.5}],
+            "edges": []})
+        result = call_tool("brain_remember", {"text": "I started learning Go"})
+        self.assertFalse(result["isError"])
+        conn = db.connect()
+        self.assertRegex(db.get_node_by_name(conn, "Go")["source"], r"^mcp \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+        conn.close()
+
     def test_remember_ingests_nodes(self):
         llm.generate = lambda *a, **k: json.dumps({
             "nodes": [{"name": "Rust", "type": "skill",

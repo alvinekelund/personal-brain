@@ -147,8 +147,9 @@ def _remember(conn, args):
     user = config.get_user()
     if not user:
         raise ValueError("No owner configured — run `brain setup` first so the tree has a root; nothing was remembered.")
+    import time as _time
     node_ids, edge_ids = extract.ingest(
-        conn, text, source=args.get("source") or "mcp", user=user
+        conn, text, source=args.get("source") or _time.strftime("mcp %Y-%m-%d %H:%M"), user=user
     )
     names = []
     for nid in node_ids:

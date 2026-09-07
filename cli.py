@@ -82,6 +82,11 @@ def add(text, file_path, url, source):
     if user:
         db.ensure_identity_anchor(conn, user)
 
+    if not source:
+        # provenance: 88 of 175 nodes had an empty source on Sep 6 2026 — text pasted
+        # into `brain add` from sessions and scheduled tasks — so nothing said when
+        # or how a claim arrived once the log line that produced it was gone
+        source = f"brain add {_dt.now():%Y-%m-%d %H:%M}"
     click.echo("Extracting knowledge...")
     # stage lines go to stderr so a scheduled task's log shows where a slow
     # Gemini call is stuck instead of a silent 10-minute wait (L-061)
