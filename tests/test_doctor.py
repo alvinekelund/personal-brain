@@ -79,7 +79,7 @@ class DoctorTests(unittest.TestCase):
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
                     settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
                     api_probe=reachable, capture_log=self.capture_log, brief_log=self.brief_log,
-                    backups_dir=self.backups)
+                    backups_dir=self.backups, probe_cache=None)
         args.update(kw)
         return doctor.run(**args)
 
@@ -213,6 +213,19 @@ class DoctorTests(unittest.TestCase):
             raise OSError("Network is unreachable")
         self.assertEqual(doctor.check_api(offline).status, "warn")
         self.assertEqual(by_name(self.run_doctor())["gemini-api"].status, "ok")
+
+    def test_api_probe_result_is_cached_for_a_while(self):
+        """Every card and doctor paid the full probe under a slow network."""
+        cache = self.tmp / "api-probe.json"
+        calls = []
+        ok = lambda: calls.append(1)
+        c1 = doctor.check_api(ok, cache=cache, now=1000.0)
+        self.assertEqual((c1.status, len(calls)), ("ok", 1))
+        c2 = doctor.check_api(lambda: (_ for _ in ()).throw(OSError("offline")), cache=cache, now=1000.0 + 60)
+        self.assertEqual((c2.status, len(calls)), ("ok", 1))                 # cached: the failing probe was not run
+        self.assertIn("probed 1 min ago", c2.detail)
+        c3 = doctor.check_api(lambda: (_ for _ in ()).throw(OSError("offline")), cache=cache, now=1000.0 + doctor.API_PROBE_CACHE_S + 1)
+        self.assertEqual(c3.status, "warn")                                  # expired: probed again
 
     def test_api_probe_gives_up_on_a_stalled_handshake(self):
         """A socket timeout does not bound a stalled TLS handshake: the doctor

@@ -80,6 +80,7 @@ def check_db(db_path: Path = DB_PATH, now: float | None = None) -> Check:
 
 API_PROBE_URL = "https://generativelanguage.googleapis.com/"
 API_PROBE_WALL_S = 8.0   # the session-start card must not hang on a stalled handshake (48 s on Sep 6 2026)
+API_PROBE_CACHE_S = 600  # a probe result is reused this long: every card and doctor paid 8 s under a slow network
 
 
 def _default_probe():
@@ -87,24 +88,42 @@ def _default_probe():
     urllib.request.urlopen(API_PROBE_URL, timeout=6, context=llm.ssl_context())
 
 
-def check_api(probe=None) -> Check:
+def check_api(probe=None, cache: Path | None = None, now: float | None = None) -> Check:
     """Can we actually complete a TLS handshake with the Gemini host? A missing
     CA bundle (python.org builds) fails here long before any key is checked —
-    exactly what silently broke every ingest after the Sep 2026 venv move."""
+    exactly what silently broke every ingest after the Sep 2026 venv move.
+    The result is cached for API_PROBE_CACHE_S so back-to-back cards and
+    doctors do not each wait out a slow network."""
     import urllib.error
+    now = now or time.time()
+    if cache is not None:
+        try:
+            c = json.loads(Path(cache).read_text(encoding="utf-8"))
+            if now - float(c.get("ts", 0)) < API_PROBE_CACHE_S and c.get("status") in ("ok", "warn", "fail"):
+                return Check("gemini-api", c["status"], f"{c.get('detail', '')} (probed {(now - float(c['ts'])) / 60:.0f} min ago)")
+        except (OSError, ValueError, TypeError):
+            pass
     try:
         llm._bounded(probe or _default_probe, API_PROBE_WALL_S)
     except TimeoutError as e:
-        return Check("gemini-api", "warn", f"{e} — the network is slow; ingest and ask will crawl")
+        result = Check("gemini-api", "warn", f"{e} — the network is slow; ingest and ask will crawl")
     except urllib.error.HTTPError:
-        return Check("gemini-api", "ok", "TLS handshake ok")   # 404 on / is fine: we reached it
+        result = Check("gemini-api", "ok", "TLS handshake ok")   # 404 on / is fine: we reached it
     except Exception as e:
         msg = str(e)
         if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate" in msg.lower():
-            return Check("gemini-api", "fail", f"TLS trust broken ({type(e).__name__}) — "
-                         f"run: {DATA_DIR}/venv/bin/pip install certifi")
-        return Check("gemini-api", "warn", f"unreachable: {msg[:80]} (offline?)")
-    return Check("gemini-api", "ok", "reachable")
+            result = Check("gemini-api", "fail", f"TLS trust broken ({type(e).__name__}) — "
+                           f"run: {DATA_DIR}/venv/bin/pip install certifi")
+        else:
+            result = Check("gemini-api", "warn", f"unreachable: {msg[:80]} (offline?)")
+    else:
+        result = Check("gemini-api", "ok", "reachable")
+    if cache is not None:
+        try:
+            Path(cache).write_text(json.dumps({"ts": now, "status": result.status, "detail": result.detail}), encoding="utf-8")
+        except OSError:
+            pass
+    return result
 
 
 def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
@@ -467,9 +486,10 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         tasks_dir: Path | None = SCHEDULED_TASKS, api_probe=None,
         capture_log: Path | None = DATA_DIR / "capture.log",
         brief_log: Path | None = DATA_DIR / "brief.log",
-        backups_dir: Path | None = DATA_DIR / "backups") -> list[Check]:
+        backups_dir: Path | None = DATA_DIR / "backups",
+        probe_cache: Path | None = DATA_DIR / "api-probe.json") -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
-              check_claims(db_path, now, root=root), check_key(), check_api(api_probe)]
+              check_claims(db_path, now, root=root), check_key(), check_api(api_probe, cache=probe_cache, now=now)]
     if backups_dir is not None:
         checks.append(check_backups(backups_dir, now))
     checks.append(check_coverage(db_path))
