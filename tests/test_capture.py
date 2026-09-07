@@ -39,7 +39,7 @@ class CaptureTestCase(unittest.TestCase):
         self._orig_config_path = config.CONFIG_PATH
         config.CONFIG_PATH = Path(self._tmp) / "config.json"
         (Path(self._tmp) / "vault").mkdir()
-        config.save({"vault_dir": str(Path(self._tmp) / "vault")})   # never the real vault
+        config.save({"vault_dir": str(Path(self._tmp) / "vault"), "user": "Alvin"})   # never the real vault
         self._orig_seen = capture.SEEN_PATH
         capture.SEEN_PATH = Path(self._tmp) / "capture-seen.jsonl"
         self._orig_log = capture.LOG_PATH
@@ -172,6 +172,15 @@ class HookBehaviourTests(CaptureTestCase):
         t = transcript(self._tmp, [user_msg("x" * 300)])
         self.run_hook(t)
         self.assertIn("no GEMINI_API_KEY", self.log_text())
+
+    def test_no_owner_skips_and_keeps_the_watermark(self):
+        config.save({"vault_dir": str(Path(self._tmp) / "vault")})    # brain setup never ran
+        llm.have_key = lambda: True
+        llm.generate = lambda *a, **k: (_ for _ in ()).throw(AssertionError("the model must not be called"))
+        t = transcript(self._tmp, [user_msg("x" * 300)])
+        self.run_hook(t)
+        self.assertIn("no owner configured", self.log_text())
+        self.assertEqual(capture.load_state(), {})                     # nothing marked as mined
 
     def test_missing_transcript_is_a_noop(self):
         self.run_hook(Path(self._tmp) / "does-not-exist.jsonl")

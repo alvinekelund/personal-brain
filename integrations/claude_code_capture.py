@@ -226,6 +226,12 @@ def _capture():
     if is_automation(text):
         log(f"session {session}: skipped (automation session — scheduled task / workflow prompt)")
         return
+    if not config.get_user():
+        # no owner, no root: every node would be an orphan (8 of them on a fresh
+        # brain on Sep 6 2026). Nothing is mined and the watermark stays, so the
+        # turns are captured once `brain setup` has run.
+        log(f"session {session}: skipped (no owner configured — run `brain setup`)")
+        return
     state = load_state()
     rec = state.get(session_id)
     mark = rec.get("chars", 0) if isinstance(rec, dict) else 0

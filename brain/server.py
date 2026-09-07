@@ -281,6 +281,9 @@ def make_handler(interval: float):
                     if not text:
                         self._json({"error": "empty"}, 400)
                         return
+                    if not config.get_user():
+                        self._json({"error": "no owner configured — run `brain setup` first"}, 400)
+                        return
                     nids, eids = extract.ingest(conn, text, source="web", user=config.get_user())
                     self._json({"nodes": len(nids), "edges": len(eids)})
                 elif path == "/ask":

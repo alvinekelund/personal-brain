@@ -152,6 +152,19 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_nothing_ingests_before_setup(self):
+        """A throwaway brain on Sep 6 2026: `brain add` before `brain setup` made
+        8 orphans and no error. Now it refuses; `setup --name` is scriptable."""
+        config.save({"vault_dir": str(self.vault_tmp)})               # no owner
+        r = self.run_cli("add", "Alvin plays padel.")
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("brain setup", r.output)
+        r = self.run_cli("setup", "--name", "Alvin")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(config.get_user(), "Alvin")
+        r = self.run_cli("setup", "--name", "  ")
+        self.assertEqual(r.exit_code, 1)
+
     def test_importance_by_name_with_bounds(self):
         r = self.run_cli("importance", "Padel", "0.2")
         self.assertEqual(r.exit_code, 0, r.output)

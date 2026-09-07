@@ -145,6 +145,8 @@ def _remember(conn, args):
     if not text:
         raise ValueError("'text' is required and must be non-empty.")
     user = config.get_user()
+    if not user:
+        raise ValueError("No owner configured — run `brain setup` first so the tree has a root; nothing was remembered.")
     node_ids, edge_ids = extract.ingest(
         conn, text, source=args.get("source") or "mcp", user=user
     )

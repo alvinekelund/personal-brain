@@ -14,18 +14,26 @@ def cli():
 # ── setup ─────────────────────────────────────────────────────────────────────
 
 @cli.command()
-def setup():
-    """Set your name so the brain knows who it belongs to."""
+@click.option("--name", "name", default=None, help="Your name (skips the prompt; for scripts and tests).")
+def setup(name):
+    """Set your name so the brain knows who it belongs to. Nothing is ingested
+    before this: without an owner every node would be an orphan."""
     current = config.get_user()
-    if current:
-        name = click.prompt(f"Your name (currently '{current}')", default=current)
-    else:
-        name = click.prompt("Your name")
+    if name is None:
+        if current:
+            name = click.prompt(f"Your name (currently '{current}')", default=current)
+        else:
+            name = click.prompt("Your name")
+    if not name.strip():
+        click.echo("A name is needed.", err=True)
+        sys.exit(1)
     config.set_user(name.strip())
     conn = db.connect()
     db.ensure_identity_anchor(conn, name.strip())
     click.echo(f"Brain configured for {name}.")
 
+
+NO_OWNER = "No owner configured — run `brain setup` first so the tree has a root; nothing was ingested."
 
 # ── add ───────────────────────────────────────────────────────────────────────
 
@@ -36,6 +44,9 @@ def setup():
 @click.option("--source", "-s", default="")
 def add(text, file_path, url, source):
     """Ingest text, a file, or a URL into the brain."""
+    if not config.get_user():
+        click.echo(NO_OWNER, err=True)
+        sys.exit(1)
     if file_path:
         try:
             raw = open(file_path, encoding="utf-8", errors="replace").read()

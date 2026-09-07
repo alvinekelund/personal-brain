@@ -48,7 +48,7 @@ class MCPTestCase(unittest.TestCase):
         db.DB_PATH = os.path.join(self._tmp, "brain.db")
         self._orig_config_path = config.CONFIG_PATH
         config.CONFIG_PATH = Path(self._tmp) / "config.json"
-        config.save({"vault_dir": str(Path(self._tmp) / "vault")})   # never the real vault
+        config.save({"vault_dir": str(Path(self._tmp) / "vault"), "user": "Alvin"})   # never the real vault
         (Path(self._tmp) / "vault").mkdir()
         self._orig_have_key = llm.have_key
         self._orig_generate = llm.generate
@@ -166,6 +166,12 @@ class ToolCallTests(MCPTestCase):
         result = call_tool("brain_ask", {"question": "football"})
         self.assertTrue(result["isError"])
         self.assertIn("api down", tool_text(result))
+
+    def test_remember_refuses_without_an_owner(self):
+        import json as _json
+        config.save({"vault_dir": str(Path(self._tmp) / "vault")})    # brain setup never ran
+        result = call_tool("brain_remember", {"text": "I started learning Rust"})
+        self.assertIn("brain setup", _json.dumps(result, ensure_ascii=False))
 
     def test_remember_ingests_nodes(self):
         llm.generate = lambda *a, **k: json.dumps({
