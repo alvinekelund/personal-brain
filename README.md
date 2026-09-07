@@ -176,6 +176,7 @@ brain importance <node> <0-1>                    # set importance deterministica
 brain forget <node>              # archive now (never the person, a category, or a node with children)
 brain merge <id1> <id2>          # merge id2 into id1 (keeps one parent, takes the higher importance)
 brain move <node> <parent>       # re-home a node (ids or exact names); no cycles, categories only under you
+brain unlink <a> <b> [--relation R]  # remove the cross-link(s) between two nodes (never part_of: use move)
 brain rename <node> <new-name>   # rename in place (refuses a name another node carries — merge instead)
 brain retype <node> <type>       # change the type; the decay half-life follows (never into/out of category)
 brain describe <node> "<text>"   # replace the content (a correction; add appends on re-mention)

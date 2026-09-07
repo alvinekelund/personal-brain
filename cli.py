@@ -524,6 +524,43 @@ def merge(id1, id2):
 
 
 @cli.command()
+@click.argument("a")
+@click.argument("b")
+@click.option("--relation", default=None, help="only this relation (default: every cross-link between the two)")
+def unlink(a, b, relation):
+    """Remove the cross-link(s) between two nodes (ids from `brain tree`, or exact names).
+
+    Merges re-point the dropped node's edges onto the survivor, so a location fact
+    folded into a residence leaves 'X located_at Residence' behind. The part_of spine
+    is never touched here — re-home with `brain move`."""
+    conn = db.connect()
+    na = db.get_node(conn, a) or db.get_node_by_name(conn, a)
+    nb = db.get_node(conn, b) or db.get_node_by_name(conn, b)
+    if not na or not nb:
+        click.echo("One or both nodes not found — use ids from `brain tree` or the exact names.", err=True)
+        sys.exit(1)
+    rel = db.normalize_relation(relation) if relation else None
+    between = [e for e in db.edges_for_node(conn, na["id"])
+               if {e["source_id"], e["target_id"]} == {na["id"], nb["id"]} and (rel is None or e["relation"] == rel)]
+    spine = [e for e in between if e["relation"] == "part_of"]
+    cross = [e for e in between if e["relation"] != "part_of"]
+    if not cross:
+        if spine:
+            click.echo(f"Only the part_of edge links {na['name']!r} and {nb['name']!r} — that is the tree spine; "
+                       "re-home with `brain move` instead.", err=True)
+        else:
+            click.echo(f"No {rel + ' ' if rel else ''}link between {na['name']!r} and {nb['name']!r}.", err=True)
+        sys.exit(1)
+    for e in cross:
+        db.delete_edge(conn, e["id"])
+    conn.commit()
+    gone = ", ".join(sorted({e["relation"] for e in cross}))
+    vault.auto_render(conn, config.get_user(), commit=f"unlink: {na['name']} -/- {nb['name']} ({gone})")
+    click.echo(f"Unlinked {na['name']!r} and {nb['name']!r}: removed {len(cross)} edge(s) ({gone})"
+               + ("; part_of kept" if spine else ""))
+
+
+@cli.command()
 @click.argument("node")
 @click.argument("parent")
 def move(node, parent):

@@ -152,6 +152,29 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_unlink_removes_cross_links_but_never_the_spine(self):
+        """Merging 'Boston area' into the residence fact re-pointed its edges,
+        leaving 'Alvin's MIT Identity located_at Alvin's Residence' behind with
+        no way to remove one edge short of SQL."""
+        db.add_edge(self.conn, self.padel, self.hobbies, "relates_to")
+        db.add_edge(self.conn, self.hobbies, self.padel, "located_at")
+        self.conn.commit()
+        r = self.run_cli("unlink", "Padel", "Knowledge")                  # only part_of between them
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("brain move", r.output)
+        r = self.run_cli("unlink", "Padel", "Hobbies", "--relation", "located_at")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("removed 1 edge(s) (located_at)", r.output)
+        left = {e["relation"] for e in db.edges_for_node(self.conn, self.padel)
+                if {e["source_id"], e["target_id"]} == {self.padel, self.hobbies}}
+        self.assertEqual(left, {"relates_to"})
+        r = self.run_cli("unlink", "Padel", "Hobbies")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertEqual(self.parent_of("Padel"), "Knowledge")             # the spine is untouched
+        r = self.run_cli("unlink", "Padel", "Hobbies")
+        self.assertEqual(r.exit_code, 1)
+        self.assertIn("No link", r.output)
+
     def test_backup_snapshots_and_prunes(self):
         import sqlite3, tempfile
         import brain.doctor as doctor
