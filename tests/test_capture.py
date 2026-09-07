@@ -97,6 +97,14 @@ class TranscriptParsingTests(CaptureTestCase):
         self.assertTrue(capture.is_automation("This is an automated run of a scheduled task. Do the thing."))
         self.assertFalse(capture.is_automation("I moved to Boston last week and want to remember my new address."))
 
+    def test_compaction_summary_is_not_the_persons_words(self):
+        """A long session's transcript carries 'This session is being continued
+        from a previous conversation…' as a user entry: the assistant's own
+        summary of its work. Two of them sat among 39 pieces on Sep 6 2026."""
+        t = transcript(self._tmp, [user_msg("This session is being continued from a previous conversation that ran out of context. Summary: the tests pass."),
+                                   user_msg("I prefer padel on Tuesdays.")])
+        self.assertEqual([txt for _, txt, _ in capture.user_pieces(t)], ["I prefer padel on Tuesdays."])
+
     def test_collects_only_human_typed_text(self):
         t = transcript(self._tmp, [
             user_msg("I prefer functional style"),

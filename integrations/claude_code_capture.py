@@ -188,8 +188,9 @@ def user_pieces(path: Path, now: float | None = None,
         for text in blocks:
             text = (text or "").strip()
             if not text or text.startswith(("<command-", "<local-command", "<system-reminder",
-                                            "<task-notification")):
-                continue
+                                            "<task-notification", "<persisted-output",
+                                            "This session is being continued from a previous conversation")):
+                continue   # harness text: a compaction summary is the assistant's account, not the person's words
             pieces.append((ts, text[:PER_MESSAGE_CAP], ts is not None and ts < cutoff))
     return pieces
 
