@@ -697,6 +697,19 @@ def reinforce(node):
 
 # ── export / import ─────────────────────────────────────────────────────────────
 
+@cli.command()
+@click.option("--label", default="", help="a word for the file name, e.g. pre-merge")
+@click.option("--keep", default=db.BACKUP_KEEP, show_default=True, help="newest backups to keep")
+def backup(label, keep):
+    """Snapshot brain.db into ~/.personal-brain/backups/ (SQLite backup API: consistent
+    even mid-write, unlike cp) and prune to the newest --keep. `brain export` is the
+    portable JSON form; this is the fast one for before a merge or a migration."""
+    conn = db.connect()
+    dest, pruned = db.backup(conn, doctor_mod.DATA_DIR / "backups", label=label, keep=keep)
+    size = dest.stat().st_size / 1e6
+    click.echo(f"Backed up to {dest} ({size:.1f} MB)" + (f"; pruned {pruned} older" if pruned else ""))
+
+
 @cli.command("export")
 @click.argument("path", required=False, default="brain-export.json")
 @click.option("--lean", is_flag=True, help="leave the embeddings out (a restore then needs `brain reindex`)")

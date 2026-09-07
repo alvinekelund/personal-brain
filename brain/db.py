@@ -315,6 +315,31 @@ def touch_node(conn, node_id):
     _reinforce_ancestors(conn, node_id)
 
 
+BACKUP_KEEP = 10
+
+
+def backup(conn, backups_dir, label: str = "", keep: int = BACKUP_KEEP) -> tuple:
+    """Copy the live database into backups_dir with SQLite's backup API — a
+    consistent snapshot even mid-write under WAL, which a plain `cp` of the
+    file is not — and prune to the newest `keep`. Returns (path, pruned)."""
+    from pathlib import Path
+    backups_dir = Path(backups_dir)
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d-%H%M%S")
+    tag = "-" + "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in label.strip()) if label.strip() else ""
+    dest = backups_dir / f"brain-{stamp}{tag}.db"
+    out = sqlite3.connect(str(dest))
+    try:
+        conn.backup(out)
+    finally:
+        out.close()
+    pruned = 0
+    for old in sorted(backups_dir.glob("brain-*.db"), key=lambda p: p.name, reverse=True)[max(keep, 1):]:
+        old.unlink()
+        pruned += 1
+    return dest, pruned
+
+
 def encode_embedding(vector) -> bytes:
     """Pack a vector as little-endian float32 — 12 KB for a 3072-dim vector
     against 42 KB as JSON text, which was three quarters of a 29 MB brain."""

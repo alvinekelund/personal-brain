@@ -152,6 +152,27 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_backup_snapshots_and_prunes(self):
+        import sqlite3, tempfile
+        import brain.doctor as doctor
+        orig = doctor.DATA_DIR
+        doctor.DATA_DIR = Path(tempfile.mkdtemp())
+        try:
+            r = self.run_cli("backup", "--label", "pre merge!")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertIn("Backed up to", r.output)
+            files = sorted((doctor.DATA_DIR / "backups").glob("brain-*.db"))
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].name.endswith("-pre-merge-.db") or "pre-merge" in files[0].name, files[0].name)
+            copy = sqlite3.connect(str(files[0]))
+            self.assertEqual(copy.execute("SELECT count(*) FROM nodes WHERE name = 'Padel'").fetchone()[0], 1)
+            copy.close()
+            for _ in range(3):
+                self.run_cli("backup", "--keep", "2")
+            self.assertEqual(len(list((doctor.DATA_DIR / "backups").glob("brain-*.db"))), 2)
+        finally:
+            doctor.DATA_DIR = orig
+
     def test_nothing_ingests_before_setup(self):
         """A throwaway brain on Sep 6 2026: `brain add` before `brain setup` made
         8 orphans and no error. Now it refuses; `setup --name` is scriptable."""

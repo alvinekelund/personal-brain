@@ -53,6 +53,9 @@ class DoctorTests(unittest.TestCase):
         self.claude_json.write_text(json.dumps({"mcpServers": {"brain": {"command": str(self.bin), "args": ["mcp"]}}}))
         self.capture_log = self.tmp / "capture.log"
         self.capture_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " session abc: ingested 2 node(s)\n")
+        self.backups = self.tmp / "backups"
+        self.backups.mkdir()
+        (self.backups / "brain-2026-09-01-080000.db").write_bytes(b"x")
         self.brief_log = self.tmp / "brief.log"
         self.brief_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " Seat lock in 3d: enroll 9.522\n")
         self.tasks = self.tmp / "scheduled-tasks"
@@ -69,7 +72,8 @@ class DoctorTests(unittest.TestCase):
             raise urllib.error.HTTPError("https://x/", 404, "nf", {}, None)
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
                     settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
-                    api_probe=reachable, capture_log=self.capture_log, brief_log=self.brief_log)
+                    api_probe=reachable, capture_log=self.capture_log, brief_log=self.brief_log,
+                    backups_dir=self.backups)
         args.update(kw)
         return doctor.run(**args)
 
@@ -80,7 +84,7 @@ class DoctorTests(unittest.TestCase):
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
         now.write(self.root)                      # NOW.md becomes generated → the now.md check applies
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "graph-tree", "claims", "gemini-key", "gemini-api", "capture", "brief", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "graph-tree", "claims", "backups", "gemini-key", "gemini-api", "capture", "brief", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -213,6 +217,19 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(by_name(self.run_doctor())["capture"].status, "fail")
         self.capture_log.unlink()
         self.assertEqual(by_name(self.run_doctor())["capture"].status, "warn")
+
+    def test_backups_check_wants_a_recent_snapshot(self):
+        self.assertEqual(by_name(self.run_doctor())["backups"].status, "ok")      # fixture: a fresh file
+        old = time.time() - 9 * 86400
+        os.utime(self.backups / "brain-2026-09-01-080000.db", (old, old))
+        c = by_name(self.run_doctor())["backups"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("9d old", c.detail)
+        (self.backups / "brain-2026-09-01-080000.db").unlink()
+        c = by_name(self.run_doctor())["backups"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("no backup yet", c.detail)
+        self.assertNotIn("backups", by_name(self.run_doctor(backups_dir=None)))
 
     def test_stale_claims_warn_with_the_cure(self):
         conn = db.connect()

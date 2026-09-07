@@ -128,6 +128,23 @@ def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
     return Check("graph-tree", "ok", rep.summary())
 
 
+BACKUP_MAX_AGE_D = 7
+
+
+def check_backups(backups_dir: Path = DATA_DIR / "backups", now: float | None = None) -> Check:
+    """Is there a recent snapshot? Today's curation ran on five hand-made `cp`
+    copies of a live WAL database; `brain backup` makes consistent ones."""
+    now = now or time.time()
+    files = sorted(Path(backups_dir).glob("brain-*.db")) if Path(backups_dir).is_dir() else []
+    if not files:
+        return Check("backups", "warn", "no backup yet — `brain backup` (the nightly sync can run it)")
+    newest = max(files, key=lambda p: p.stat().st_mtime)
+    age_d = (now - newest.stat().st_mtime) / 86400
+    if age_d > BACKUP_MAX_AGE_D:
+        return Check("backups", "warn", f"newest backup is {age_d:.0f}d old ({newest.name}) — `brain backup`")
+    return Check("backups", "ok", f"{len(files)} snapshot(s), newest {age_d * 24:.0f}h ago ({newest.name})")
+
+
 def check_claims(db_path: Path, now: float | None = None, user: str = "") -> Check:
     """Content integrity: nodes still saying "plans to" / "is currently" a month
     after they were written are claims nobody re-read ("Alvin plans to relocate
@@ -365,9 +382,12 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         settings: Path | None = CLAUDE_SETTINGS, claude_json: Path | None = CLAUDE_JSON,
         tasks_dir: Path | None = SCHEDULED_TASKS, api_probe=None,
         capture_log: Path | None = DATA_DIR / "capture.log",
-        brief_log: Path | None = DATA_DIR / "brief.log") -> list[Check]:
+        brief_log: Path | None = DATA_DIR / "brief.log",
+        backups_dir: Path | None = DATA_DIR / "backups") -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
               check_claims(db_path, now), check_key(), check_api(api_probe)]
+    if backups_dir is not None:
+        checks.append(check_backups(backups_dir, now))
     if capture_log is not None:
         checks.append(check_capture(capture_log, now))
     if brief_log is not None:
