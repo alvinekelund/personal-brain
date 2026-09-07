@@ -128,6 +128,28 @@ def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
     return Check("graph-tree", "ok", rep.summary())
 
 
+def check_claims(db_path: Path, now: float | None = None, user: str = "") -> Check:
+    """Content integrity: nodes still saying "plans to" / "is currently" a month
+    after they were written are claims nobody re-read ("Alvin plans to relocate
+    to Boston", 91 days on, from a mail backfill). The cure is a restatement."""
+    import sqlite3
+    from brain import integrity
+    if not Path(db_path).is_file():
+        return Check("claims", "fail", f"{db_path} missing")
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        stale = integrity.stale_claims(conn, now=now)
+        conn.close()
+    except sqlite3.Error as e:
+        return Check("claims", "fail", f"cannot read graph: {e}")
+    if not stale:
+        return Check("claims", "ok", f"no plan-tense claim older than {integrity.STALE_CLAIM_DAYS}d")
+    named = "; ".join(f"{n} ({age}d, '{phrase}')" for n, phrase, age in stale[:3])
+    return Check("claims", "warn", f"{len(stale)} node(s) still in plan-tense after "
+                 f"{integrity.STALE_CLAIM_DAYS}d: {named} — `brain stale`, then `brain describe`")
+
+
 def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None = None) -> Check:
     """Ambient capture: did the last runs succeed, and when did one last ingest?"""
     import re
@@ -345,7 +367,7 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         capture_log: Path | None = DATA_DIR / "capture.log",
         brief_log: Path | None = DATA_DIR / "brief.log") -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
-              check_key(), check_api(api_probe)]
+              check_claims(db_path, now), check_key(), check_api(api_probe)]
     if capture_log is not None:
         checks.append(check_capture(capture_log, now))
     if brief_log is not None:

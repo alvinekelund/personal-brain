@@ -80,7 +80,7 @@ class DoctorTests(unittest.TestCase):
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
         now.write(self.root)                      # NOW.md becomes generated → the now.md check applies
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "graph-tree", "gemini-key", "gemini-api", "capture", "brief", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "graph-tree", "claims", "gemini-key", "gemini-api", "capture", "brief", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -213,6 +213,16 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(by_name(self.run_doctor())["capture"].status, "fail")
         self.capture_log.unlink()
         self.assertEqual(by_name(self.run_doctor())["capture"].status, "warn")
+
+    def test_stale_claims_warn_with_the_cure(self):
+        conn = db.connect()
+        nid = db.add_node(conn, "Move to Boston", type_="event", content="Alvin plans to relocate to Boston.")
+        conn.execute("UPDATE nodes SET created_at = ? WHERE id = ?", (time.time() - 91 * 86400, nid))
+        conn.commit(); conn.close()
+        c = by_name(self.run_doctor())["claims"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("Move to Boston (91d, 'plans to')", c.detail)
+        self.assertIn("brain stale", c.detail)
 
     def test_unregistered_mcp_is_a_warning(self):
         self.claude_json.write_text(json.dumps({"mcpServers": {}}))

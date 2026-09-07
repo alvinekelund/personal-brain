@@ -974,6 +974,26 @@ def repair_cmd():
 
 
 @cli.command()
+@click.option("--days", default=None, type=int, help="Age in days before a plan-tense claim counts as stale (default 30).")
+def stale(days):
+    """List nodes still saying "plans to" / "is currently" long after they were
+    written — claims nobody re-read. Restate what is true now with `brain describe`
+    (a plan dated "as of <month year>" is deliberate and never listed)."""
+    from brain import integrity
+    conn = db.connect()
+    rows = integrity.stale_claims(conn, days=days or integrity.STALE_CLAIM_DAYS)
+    if not rows:
+        click.echo(f"No plan-tense claim older than {days or integrity.STALE_CLAIM_DAYS} days.")
+        return
+    for name, phrase, age in rows:
+        n = db.get_node_by_name(conn, name)
+        content = " ".join((n["content"] or "").split())
+        click.echo(f"{age:4d}d  {name}  '{phrase}'\n       {content[:160]}{'…' if len(content) > 160 else ''}")
+    click.echo(f"\n{len(rows)} claim(s). Restate each with `brain describe <node> \"<what is true now>\"` "
+               "or `brain forget <node>` if it no longer matters.")
+
+
+@cli.command()
 @click.option("--threshold", default=extract.SUBGROUP_THRESHOLD, show_default=True,
               help="a category with more direct (non-category) children than this is split")
 def subgroup(threshold):

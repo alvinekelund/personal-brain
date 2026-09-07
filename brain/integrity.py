@@ -326,3 +326,35 @@ def repair(conn, user: str) -> dict:
                 break
     conn.commit()
     return out
+
+
+# ── content integrity: claims that stopped being true ─────────────────────────
+STALE_CLAIM_DAYS = 30
+_PLAN_TENSE = re.compile(r"\b(plans? to|planning to|is currently|currently|intends? to|wants? to|"
+                         r"is trying to|is considering|will be|upcoming|soon)\b", re.I)
+_DATED = re.compile(r"\bas of\b", re.I)
+
+
+def stale_claims(conn, days: int = STALE_CLAIM_DAYS, now: float | None = None) -> list[tuple[str, str, int]]:
+    """Nodes whose content still speaks in plan or present tense ("plans to
+    enroll", "is currently trying to") `days` after they were written. A
+    backfill of old mail wrote "Alvin plans to relocate to Boston" and "plans
+    to pursue studies" at Harvard three months before anyone read them, and
+    ingest appends on re-mention, so the stale sentence keeps standing.
+    Returns (name, phrase, age_days), oldest first. A claim dated with "as of"
+    is deliberate and skipped — date a long-running plan and it stops nagging."""
+    import time
+    now = now or time.time()
+    out = []
+    for n in db.all_nodes(conn):
+        if n["type"] == "category":
+            continue
+        content = n["content"] or ""
+        age = int((now - n["created_at"]) // 86400)
+        if age < days or _DATED.search(content):
+            continue
+        m = _PLAN_TENSE.search(content)
+        if m:
+            out.append((n["name"], m.group(0), age))
+    return sorted(out, key=lambda x: (-x[2], x[0]))
+

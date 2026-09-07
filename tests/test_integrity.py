@@ -141,6 +141,31 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r.summary(), "tree intact")
         self.assertEqual(r.thin_areas, [])        # one area with one node: a young brain, not sprawl
 
+    def test_stale_claims_are_old_plan_tense_content(self):
+        """A June mail backfill wrote "Alvin plans to relocate to Boston" and
+        "plans to pursue studies" at Harvard; 91 days later, enrolled and living
+        in Cambridge, the graph still said so. Old plan-tense content is listed,
+        oldest first; fresh plans and dated ("as of") plans are not."""
+        import time
+        c = self.conn
+        db.ensure_identity_anchor(c, "Alvin")
+        now = time.time()
+        old = db.add_node(c, "Move to Boston", type_="event", content="Alvin plans to relocate to Boston.")
+        older = db.add_node(c, "Harvard", type_="organization", content="A university where Alvin plans to pursue studies.")
+        dated = db.add_node(c, "IRONMAN Barcelona", type_="event", content="As of June 2026 Alvin plans to race sub-10.")
+        fresh = db.add_node(c, "Apple Cash", type_="concept", content="Alvin is currently trying to set it up.")
+        done = db.add_node(c, "AC 215", type_="concept", content="Alvin took AC 215 in fall 2026.")
+        cat = db.add_node(c, "Plans", type_="category", content="Things Alvin plans to do.")
+        for nid, age in ((old, 91), (older, 95), (dated, 95), (fresh, 3), (done, 95), (cat, 95)):
+            c.execute("UPDATE nodes SET created_at = ? WHERE id = ?", (now - age * 86400, nid))
+        c.commit()
+        rows = integrity.stale_claims(c, now=now)
+        self.assertEqual(rows, [("Harvard", "plans to", 95), ("Move to Boston", "plans to", 91)])
+        self.assertEqual(integrity.stale_claims(c, days=2, now=now)[-1][0], "Apple Cash")   # a shorter window catches the fresh one
+        db.set_content(c, old, "Alvin moved to Cambridge, MA on 24 Aug 2026 for the Harvard SM in Data Science.")
+        c.commit()
+        self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=now)], ["Harvard"])  # a restatement clears it
+
     def test_norm_ignores_possessives(self):
         self.assertEqual(integrity._norm("Alvin's Girlfriend"), "girlfriend")
         self.assertEqual(integrity._norm("The MIT-identity!"), "mit identity")

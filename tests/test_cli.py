@@ -152,6 +152,19 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_stale_lists_old_plan_tense_claims(self):
+        import time
+        r = self.run_cli("stale")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("No plan-tense claim older than 30 days", r.output)
+        self.conn.execute("UPDATE nodes SET content = 'Alvin plans to take up padel.', created_at = ? WHERE id = ?",
+                          (time.time() - 45 * 86400, self.padel))
+        self.conn.commit()
+        r = self.run_cli("stale")
+        self.assertIn("45d  Padel  'plans to'", r.output)
+        self.assertIn("brain describe", r.output)
+        self.assertIn("No plan-tense claim older than 60 days", self.run_cli("stale", "--days", "60").output)
+
     def test_curation_commands_commit_their_views(self):
         """Regression (Sep 6 2026): merge/move/rename/... re-rendered DIGEST.md
         and graph/ but left them uncommitted, so nine curation commands in a row
