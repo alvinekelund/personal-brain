@@ -241,6 +241,22 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Move to Boston (91d, 'plans to')", c.detail)
         self.assertIn("brain stale", c.detail)
 
+    def test_category_cross_links_warn_not_pass(self):
+        """8 'relates_to <category>' edges showed under a green graph-tree line
+        on Sep 6 2026: the summary named them, the status did not."""
+        conn = db.connect()
+        db.ensure_identity_anchor(conn, "Alvin")
+        me = db.get_node_by_name(conn, "Alvin")["id"]
+        edu = db.add_node(conn, "Education", type_="category"); db.add_edge(conn, edu, me, "part_of")
+        h = db.add_node(conn, "Harvard", type_="organization"); db.add_edge(conn, h, edu, "part_of")
+        db.add_edge(conn, h, edu, "relates_to")
+        for nid in (me, edu, h):
+            db.set_embedding(conn, nid, [0.1, 0.2])
+        conn.commit(); conn.close()
+        c = by_name(self.run_doctor())["graph-tree"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("1 cross-link(s) to a category (brain repair)", c.detail)
+
     def test_unregistered_mcp_is_a_warning(self):
         self.claude_json.write_text(json.dumps({"mcpServers": {}}))
         self.assertEqual(by_name(self.run_doctor())["mcp"].status, "warn")
