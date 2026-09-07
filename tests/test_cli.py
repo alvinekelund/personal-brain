@@ -175,6 +175,27 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 1)
         self.assertIn("No link", r.output)
 
+    def test_semantic_query_shows_paths_and_files_like_keyword_does(self):
+        import brain.llm as llm
+        self.conn.execute("UPDATE nodes SET path = 'topics/padel.md' WHERE id = ?", (self.padel,))
+        db.set_embedding(self.conn, self.padel, [1.0, 0.0])
+        self.conn.commit()
+        (self.vault_tmp / "topics").mkdir(exist_ok=True)
+        (self.vault_tmp / "topics" / "padel.md").write_text("---\ntype: topic\nname: Padel\nupdated: 2026-09-01\n---\n# Padel\n- racket sport\n")
+        import brain.index as index
+        index.build(self.conn, self.vault_tmp, embed=False)
+        orig = llm.embed
+        llm.embed = lambda *a, **k: [1.0, 0.0]
+        try:
+            r = self.run_cli("query", "racket sport", "--semantic")
+        finally:
+            llm.embed = orig
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("Padel", r.output)
+        self.assertIn("→ topics/padel.md", r.output)                       # the node's file, as the keyword path shows it
+        self.assertIn("files (the vault is the source of truth)", r.output)
+        self.assertIn("topics/padel.md", r.output.split("files (")[1])
+
     def test_add_shows_where_each_node_was_filed(self):
         """Six dashboard widgets filed under one project on Sep 4 2026 only
         surfaced in a survey two days later: the add output named the nodes but

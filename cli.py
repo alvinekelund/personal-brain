@@ -170,27 +170,33 @@ def query(query, min_weight, limit, semantic):
     conn = db.connect()
     _run_decay(conn)
 
+    from brain import index as vindex
+    qvec = None
     if semantic:
         from brain import llm
-        scored = graph.semantic_search(conn, llm.embed(query), min_weight=min_weight, limit=limit)
+        qvec = llm.embed(query)
+        scored = graph.semantic_search(conn, qvec, min_weight=min_weight, limit=limit)
         if not scored:
             click.echo("No embedded nodes yet — run `brain reindex` first.")
             return
+        results = []
         for score, r in scored:
             db.touch_node(conn, r["id"])
-            click.echo(f"[{r['type']:8s}] {r['name']:30s}  sim={score:.3f}  {r['content'][:55]}")
+            results.append(r)
+            path = r["path"] if "path" in r.keys() and r["path"] else ""
+            click.echo(f"[{r['type']:8s}] {r['name']:30s}  sim={score:.3f}  {r['content'][:55]}"
+                       + (f"  → {path}" if path else ""))
         conn.commit()
-        return
-
-    results = graph.query_nodes(conn, query, min_weight=min_weight)[:limit]
-    for r in results:
-        path = r["path"] if "path" in r.keys() and r["path"] else ""
-        click.echo(
-            f"[{r['type']:8s}] {r['name']:30s}  w={r['weight']:.2f}  {r['content'][:60]}"
-            + (f"  → {path}" if path else "")
-        )
-    from brain import index as vindex
-    files = vindex.search(conn, query, k=6, seed_node_ids=[r["id"] for r in results])
+    else:
+        results = graph.query_nodes(conn, query, min_weight=min_weight)[:limit]
+        for r in results:
+            path = r["path"] if "path" in r.keys() and r["path"] else ""
+            click.echo(
+                f"[{r['type']:8s}] {r['name']:30s}  w={r['weight']:.2f}  {r['content'][:60]}"
+                + (f"  → {path}" if path else "")
+            )
+    # the files are the brain (D-014): both paths end with the vault files that match
+    files = vindex.search(conn, query, k=6, seed_node_ids=[r["id"] for r in results], query_vector=qvec)
     if not results and not files:
         click.echo("No results.")
         return
