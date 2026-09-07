@@ -402,6 +402,20 @@ class GitCommitTests(LoopsTestCase):
         self.assertNotIn("DIGEST.md", " ".join(dirt))          # target committed
         self.assertEqual(self.last_message(), "ingest: test")
 
+    def test_git_commit_waits_out_another_process_lock(self):
+        """Two sessions committed the vault within the same second on Sep 6 2026;
+        a commit that meets .git/index.lock used to fail silently."""
+        import subprocess, threading, time as _time
+        for cmd in (["git", "init", "-q"], ["git", "config", "user.email", "t@test"], ["git", "config", "user.name", "t"]):
+            subprocess.run(cmd, cwd=self.root, check=True, capture_output=True)
+        (self.root / "note.md").write_text("x")
+        lock = self.root / ".git" / "index.lock"
+        lock.write_text("")                                                    # someone else is mid-commit
+        threading.Timer(0.5, lambda: lock.unlink(missing_ok=True)).start()     # ...for half a second
+        self.assertTrue(loops.git_commit(self.root, "waited"))
+        msg = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.root, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(msg, "waited")
+
     def test_git_commit_paths_without_repo_or_changes(self):
         self.assertFalse(loops.git_commit_paths(self.root, ["DIGEST.md"], "m"))   # no .git
         self.git_root()

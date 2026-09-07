@@ -267,16 +267,32 @@ def _guarded_root(root: Path) -> bool:
     return True
 
 
+GIT_LOCK_RETRIES = 4       # two sessions committed the vault within the same second on Sep 6 2026
+GIT_LOCK_WAIT_S = 0.3
+
+
+def _git(args: list[str], timeout: float = 30) -> subprocess.CompletedProcess:
+    """Run git; when another process holds .git/index.lock, wait briefly and
+    retry instead of losing the commit (a lost commit leaves the vault dirty
+    with nobody the wiser)."""
+    import time as _time
+    for attempt in range(GIT_LOCK_RETRIES + 1):
+        r = subprocess.run(args, capture_output=True, timeout=timeout)
+        if r.returncode == 0 or b"index.lock" not in (r.stderr or b"") or attempt == GIT_LOCK_RETRIES:
+            return r
+        _time.sleep(GIT_LOCK_WAIT_S)
+    return r
+
+
 def git_commit(root: Path, message: str) -> bool:
     """Commit the vault if it is a git repo and something changed. Never raises."""
     root = Path(root)
     if not (root / ".git").exists() or not _guarded_root(root):
         return False
     try:
-        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
-                       capture_output=True, timeout=30)
-        r = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", message],
-                           capture_output=True, timeout=30)
+        if _git(["git", "-C", str(root), "add", "-A"]).returncode != 0:
+            return False
+        r = _git(["git", "-C", str(root), "commit", "-q", "-m", message])
         return r.returncode == 0
     except (subprocess.SubprocessError, OSError):
         return False
@@ -294,10 +310,9 @@ def git_commit_paths(root: Path, paths: list[str], message: str) -> bool:
     if not present:
         return False
     try:
-        subprocess.run(["git", "-C", str(root), "add", "-A", "--"] + present,
-                       check=True, capture_output=True, timeout=30)
-        r = subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", message, "--"] + present,
-                           capture_output=True, timeout=30)
+        if _git(["git", "-C", str(root), "add", "-A", "--"] + present).returncode != 0:
+            return False
+        r = _git(["git", "-C", str(root), "commit", "-q", "-m", message, "--"] + present)
         return r.returncode == 0
     except (subprocess.SubprocessError, OSError):
         return False
