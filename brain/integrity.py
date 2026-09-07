@@ -46,6 +46,7 @@ class Report:
     thin_areas: list[tuple[str, int]] = field(default_factory=list)  # top-level categories with that few descendants
     fact_parents: list[tuple[str, list[str]]] = field(default_factory=list)  # a fact with children: a leaf used as a container
     category_links: int = 0                                       # cross-links (non-part_of) touching a category: structure noise
+    misoriented: list[tuple[str, str, str]] = field(default_factory=list)   # passive relations written backwards
 
     @property
     def structural(self) -> int:
@@ -57,7 +58,7 @@ class Report:
     def clean(self) -> bool:
         return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
                 and not self.oversized and not self.flat_lists and not self.thin_areas
-                and not self.fact_parents and not self.category_links)
+                and not self.fact_parents and not self.category_links and not self.misoriented)
 
     def summary(self) -> str:
         bits = []
@@ -70,6 +71,9 @@ class Report:
         if self.dangling_edges: bits.append(f"{self.dangling_edges} dangling edge(s) to deleted nodes")
         if self.legacy_tasks: bits.append(f"{len(self.legacy_tasks)} legacy task node(s)")
         if self.category_links: bits.append(f"{self.category_links} cross-link(s) to a category (brain repair)")
+        if self.misoriented:
+            bits.append(f"{len(self.misoriented)} edge(s) written backwards: "
+                        + "; ".join(f"{a} {rel} {b}" for a, rel, b in self.misoriented[:2]) + " (brain repair)")
         if self.duplicates: bits.append(f"{len(self.duplicates)} possible duplicate pair(s)")
         if self.oversized:
             bits.append("oversized: " + ", ".join(f"{n} ({c})" for n, c in self.oversized[:4]) + " (brain subgroup)")
@@ -196,6 +200,10 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
                         r.duplicates.append(pair)
                         listed.add(frozenset(pair))
     r.semantic_duplicates.sort(key=lambda x: -x[2])
+    # passive relations written backwards ("Alvin studied_by Harvard"): the agent belongs at the target
+    for s_, t_, rel in conn.execute("SELECT source_id, target_id, relation FROM edges WHERE relation IN ('studied_by', 'attended_by', 'created_by')"):
+        if s_ in nodes and t_ in nodes and db.orient_edge(conn, s_, t_, rel) != (s_, t_):
+            r.misoriented.append((nodes[s_]["name"], rel, nodes[t_]["name"]))
     # a cross-link to a category is structure noise: merges used to keep the dropped
     # node's category parent as "relates_to Education" (13 of them on Sep 6 2026)
     r.category_links = sum(
@@ -326,14 +334,23 @@ def repair(conn, user: str) -> dict:
     - orphan: attach to its type's fallback category (created and rooted if needed);
     - cycle: cut the part_of edge leaving the node with the larger subtree;
     - dangling edge (its source or target node was deleted): removed;
-    - cross-link touching a category (structure noise a merge left behind): removed.
+    - cross-link touching a category (structure noise a merge left behind): removed;
+    - passive relation written backwards ("Alvin studied_by Harvard"): turned round.
     Never deletes or renames nodes; duplicates and embeddings are reported, not fixed."""
     out = {"multi_parent": 0, "categories": 0, "under_identity": 0, "orphans": 0, "cycles": 0,
-           "dangling": 0, "category_links": 0}
+           "dangling": 0, "category_links": 0, "oriented": 0}
     db.ensure_identity_anchor(conn, user)
     ident = db.get_node_by_name(conn, user)["id"]
     # 0. edges to nodes that no longer exist
     out["dangling"] = conn.execute(f"DELETE FROM edges {_DANGLING_WHERE}").rowcount
+    # 0a. passive relations written backwards: the agent belongs at the target end
+    for e in conn.execute("SELECT id, source_id, target_id, relation, weight FROM edges "
+                          "WHERE relation IN ('studied_by', 'attended_by', 'created_by')").fetchall():
+        src, tgt = db.orient_edge(conn, e["source_id"], e["target_id"], e["relation"])
+        if (src, tgt) != (e["source_id"], e["target_id"]):
+            db.delete_edge(conn, e["id"])
+            db.add_edge(conn, src, tgt, e["relation"], e["weight"])
+            out["oriented"] += 1
     # 0b. cross-links touching a category: structure, not knowledge
     out["category_links"] = conn.execute(
         "DELETE FROM edges WHERE relation != 'part_of' AND (source_id IN (SELECT id FROM nodes WHERE type = 'category') "

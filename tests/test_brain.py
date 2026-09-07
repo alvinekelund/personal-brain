@@ -1184,6 +1184,26 @@ class MergeTests(BrainTestCase):
         self.assertNotIn("attention", names)
 
 
+class EdgeOrientationTests(BrainTestCase):
+    def test_passive_relations_put_the_agent_at_the_target(self):
+        """'Alvin studied_by Harvard', 'Trimtex created_by Team kit' — 11 edges
+        the extractor wrote backwards on Sep 6 2026. add_edge turns them round;
+        a well-formed edge and a non-passive relation are left alone."""
+        alvin = db.add_node(self.conn, "Alvin", type_="person")
+        harvard = db.add_node(self.conn, "Harvard", type_="organization")
+        kit = db.add_node(self.conn, "Team kit", type_="artifact")
+        trimtex = db.add_node(self.conn, "Trimtex", type_="organization")
+        db.add_edge(self.conn, alvin, harvard, "studied_by")          # backwards
+        db.add_edge(self.conn, trimtex, kit, "created_by")            # backwards
+        db.add_edge(self.conn, harvard, alvin, "attended_by")         # right
+        db.add_edge(self.conn, alvin, harvard, "works_at")            # not passive
+        self.conn.commit()
+        edges = {(db.get_node(self.conn, e["source_id"])["name"], e["relation"], db.get_node(self.conn, e["target_id"])["name"])
+                 for e in db.all_edges(self.conn)}
+        self.assertEqual(edges, {("Harvard", "studied_by", "Alvin"), ("Team kit", "created_by", "Trimtex"),
+                                 ("Harvard", "attended_by", "Alvin"), ("Alvin", "works_at", "Harvard")})
+
+
 class MergeNodesTests(BrainTestCase):
     def test_repoints_edges_and_deletes_drop(self):
         a = db.add_node(self.conn, "A", type_="concept")

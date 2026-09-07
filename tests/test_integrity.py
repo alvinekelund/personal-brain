@@ -60,6 +60,9 @@ class IntegrityTests(BrainTestCase):
         pc = db.add_node(c, "Alvin's computer", type_="artifact"); db.add_edge(c, pc, home, "part_of")
         # a cross-link to a category: structure noise a merge left behind
         db.add_edge(c, harvard, edu, "relates_to")
+        # a passive relation written backwards, inserted raw (add_edge would turn it round)
+        c.execute("INSERT INTO edges (id, source_id, target_id, relation, weight, created_at, last_reinforced) VALUES "
+                  "('bk1', ?, ?, 'studied_by', 1.0, 0, 0)", (me, harvard))
         # an empty template area and a one-node area beside the broad ones: thin
         health = db.add_node(c, "Health", type_="category"); db.add_edge(c, health, me, "part_of")
         fam = db.add_node(c, "Family", type_="category"); db.add_edge(c, fam, me, "part_of")
@@ -95,6 +98,8 @@ class IntegrityTests(BrainTestCase):
         self.assertIn("thin area(s): Health (0), Family (1)", r.summary())
         self.assertIn("brain move <area> <broader>", r.summary())
         self.assertEqual(r.category_links, 1)
+        self.assertEqual(r.misoriented, [("Alvin", "studied_by", "Harvard")])
+        self.assertIn("1 edge(s) written backwards: Alvin studied_by Harvard (brain repair)", r.summary())
         self.assertIn("1 cross-link(s) to a category (brain repair)", r.summary())
         self.assertEqual(r.fact_parents, [("Alvin's Residence (US)", ["Alvin's computer"]),
                                           ("MIT identity", ["Life Events"])])           # the mis-rooted category counts too
@@ -110,6 +115,9 @@ class IntegrityTests(BrainTestCase):
         fixed = integrity.repair(self.conn, "Alvin")
         self.assertEqual(fixed["dangling"], 1)         # the ghost's edge is gone
         self.assertEqual(fixed["category_links"], 1)   # Harvard relates_to Education: gone
+        self.assertEqual(fixed["oriented"], 1)         # Alvin studied_by Harvard: turned round
+        after = integrity.check(self.conn, "Alvin")
+        self.assertEqual(after.misoriented, [])
         self.assertEqual(integrity.check(self.conn, "Alvin").category_links, 0)
         self.assertEqual(integrity.check(self.conn, "Alvin").dangling_edges, 0)
         self.assertEqual(fixed["orphans"], 6)          # Boston + the five parentless people/task nodes

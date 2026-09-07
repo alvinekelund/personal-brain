@@ -456,8 +456,28 @@ def search_nodes(conn, query, min_weight=0.0):
 
 # ── Edges ──────────────────────────────────────────────────────────────────
 
+AGENT_TYPES = {"person", "organization"}
+PASSIVE_RELATIONS = {"studied_by": {"person"}, "attended_by": {"person"}, "created_by": AGENT_TYPES}
+
+
+def orient_edge(conn, source_id, target_id, relation):
+    """The right way round for a passive relation: 'X studied_by Y' means Y
+    (a person) studies X, 'X created_by Y' means Y (a person or organisation)
+    made X. The extractor wrote 'Alvin studied_by Harvard' and 'Trimtex
+    created_by Team kit' — 11 such edges on Sep 6 2026. When the agent sits at
+    the source and the target is no agent, swap them; otherwise leave alone."""
+    agents = PASSIVE_RELATIONS.get(relation)
+    if not agents:
+        return source_id, target_id
+    src, tgt = get_node(conn, source_id), get_node(conn, target_id)
+    if src and tgt and src["type"] in agents and tgt["type"] not in agents:
+        return target_id, source_id
+    return source_id, target_id
+
+
 def add_edge(conn, source_id, target_id, relation="relates_to", weight=1.0):
     relation = normalize_relation(relation)  # keep the graph on the controlled vocab
+    source_id, target_id = orient_edge(conn, source_id, target_id, relation)
     existing = conn.execute(
         "SELECT id FROM edges WHERE source_id=? AND target_id=? AND relation=?",
         (source_id, target_id, relation),
