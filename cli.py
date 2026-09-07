@@ -788,13 +788,8 @@ def import_cmd(path):
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _run_decay(conn):
-    """Decay, and when it archived or deleted anything, refresh the vault views
-    so a forgotten node does not linger in graph/ until the next ingest."""
-    result = decay.run_decay(conn)
-    if result.get("archived") or result.get("deleted"):
-        vault.auto_render(conn, config.get_user(),
-                          commit=f"decay: {result.get('archived', 0)} archived, {result.get('deleted', 0)} deleted")
-    return result
+    """Decay, refreshing the vault views when anything was archived or deleted."""
+    return decay.run_and_refresh(conn, config.get_user())
 
 
 def _synthesize(conn):

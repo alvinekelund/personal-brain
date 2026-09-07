@@ -136,6 +136,26 @@ class DecayClockTests(BrainTestCase):
         decay.run_decay(self.conn, now=_time.time() + 20 * 86400)             # Sep 26: the hackathon is over
         self.assertLess(db.get_node(self.conn, hack)["weight"], 1.0)
 
+    def test_run_and_refresh_rewrites_the_views_on_archive(self):
+        """The MCP and web servers ran decay without re-rendering, so a node
+        they let fade lingered in graph/ until the next CLI command."""
+        import time as _time
+        config.save({"vault_dir": str(self.vault_tmp), "user": "Alvin"})
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        hobbies = db.add_node(self.conn, "Hobbies", type_="category"); db.add_edge(self.conn, hobbies, me, "part_of")
+        padel = db.add_node(self.conn, "Padel", type_="event", importance=0.0); db.add_edge(self.conn, padel, hobbies, "part_of")
+        self.conn.commit()
+        r = decay.run_and_refresh(self.conn, "Alvin")
+        self.assertEqual(r["archived"], 0)
+        old = _time.time() - 3650 * 86400
+        self.conn.execute("UPDATE nodes SET last_accessed = ?, last_decayed = ? WHERE id = ?", (old, old, padel))
+        self.conn.commit()
+        r = decay.run_and_refresh(self.conn, "Alvin")
+        self.assertEqual(r["archived"], 1)
+        views = "".join(f.read_text() for f in (self.vault_tmp / "graph").glob("*.md"))
+        self.assertNotIn("Padel", views)
+
     def test_access_resets_the_clock(self):
         nid = db.add_node(self.conn, "Thing", type_="concept", importance=0.0)
         self._age(nid, 60)

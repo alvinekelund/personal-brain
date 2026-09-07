@@ -275,7 +275,7 @@ def _call_tool(params: dict) -> dict:
         raise KeyError(name)
     conn = db.connect()
     try:
-        decay.run_decay(conn)  # forgetting advances on every access, like the CLI
+        decay.run_and_refresh(conn, config.get_user())  # forgetting advances on every access, like the CLI
         text = handler(conn, params.get("arguments") or {})
         return {"content": [{"type": "text", "text": text}], "isError": False}
     except Exception as e:

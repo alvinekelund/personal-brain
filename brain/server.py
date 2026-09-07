@@ -79,7 +79,7 @@ def api_node(conn, node_id):
 
 
 def api_status(conn):
-    decay.run_decay(conn)
+    decay.run_and_refresh(conn, config.get_user())
     return {"stats": db.stats(conn), "fading": decay.at_risk_nodes(conn),
             "areas": graph.category_breakdown(conn, config.get_user())}
 
@@ -222,7 +222,7 @@ setInterval(async()=>{try{const v=(await (await fetch('/version')).text()).trim(
 
 
 def render_page(conn, interval: float, view: str = "2d", min_weight: float = 0.0) -> str:
-    decay.run_decay(conn)
+    decay.run_and_refresh(conn, config.get_user())
     if view == "3d":
         html = visualize.build_html_3d(conn, min_weight=min_weight)
     else:

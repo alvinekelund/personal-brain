@@ -203,3 +203,15 @@ def run_decay(conn, now: float | None = None) -> dict:
         "deleted": deleted,
         "edges_pruned": edges_pruned,
     }
+
+
+def run_and_refresh(conn, user: str = "", now: float | None = None) -> dict:
+    """run_decay, then refresh the vault views when anything was archived or
+    deleted — one helper for the CLI, the MCP server and the web server, so a
+    forgotten node never lingers in graph/ whichever surface let it fade."""
+    result = run_decay(conn, now=now)
+    if result.get("archived") or result.get("deleted"):
+        from brain import vault
+        vault.auto_render(conn, user, commit=f"decay: {result.get('archived', 0)} archived, {result.get('deleted', 0)} deleted")
+    return result
+
