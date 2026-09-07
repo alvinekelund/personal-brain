@@ -318,8 +318,10 @@ def check_index(db_path: Path = DB_PATH, root: Path | None = None) -> Check:
         return Check("vault-index", "warn",
                      f"{len(ledger_stale)} ledger line(s) changed since the last index ({', '.join(ledger_stale[:4])}"
                      f"{'…' if len(ledger_stale) > 4 else ''}) — run `brain index`")
+    pending = max(0, s["indexed"] - s["embedded"])
     return Check("vault-index", "ok", f"{s['indexed']} files · {s['node_links']} node links · {s['embedded']} embedded"
-                 f" · {s.get('ledger_embedded', 0)}/{s.get('ledger_total', 0)} ledger lines")
+                 + (f" ({pending} await embedding — `brain index` when the API answers)" if pending else "")
+                 + f" · {s.get('ledger_embedded', 0)}/{s.get('ledger_total', 0)} ledger lines")
 
 
 def check_key() -> Check:

@@ -109,6 +109,7 @@ class DoctorTests(unittest.TestCase):
         checks = by_name(self.run_doctor())
         self.assertEqual(checks["vault-index"].status, "ok", checks["vault-index"].detail)
         self.assertIn("ledger lines", checks["vault-index"].detail)
+        self.assertIn("1 await embedding", checks["vault-index"].detail)      # built with embed=False: says so
         # a loop written after the last index is matched by nothing until `brain index` runs
         loops.add(self.root, "Collect the repayments", "2026-09-21", "alvin", "life", "chase", today=TODAY, commit=False)
         checks = by_name(self.run_doctor())
