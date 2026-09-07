@@ -1,8 +1,8 @@
 # Changelog
 
-Newest first. One section per day of work; each bullet names what changed and why, with the commits that carry it (`git log 5af0c6c..7642567` lists all 110 of Sep 6).
+Newest first. One section per day of work; each bullet names what changed and why, with the commits that carry it (`git log 5af0c6c..7642567` lists all 125 of Sep 6).
 
-## 2026-09-06 — 110 commits, 380 tests, CI green
+## 2026-09-06 — 125 commits, 393 tests, CI green
 
 **Ingest and extraction**
 - Gemini calls carry a wall-clock budget; `brain add` shows its stages and every retry wait; long inputs are extracted chunk-parallel (`5af0c6c`, `c36812c`, `a8ce5d7`, `e440256`).
@@ -26,6 +26,8 @@ Newest first. One section per day of work; each bullet names what changed and wh
 - Keyword search ranks the thing itself above things that mention it and knowledge above structure; semantic search skips categories; `brain ask` reports what it cited on every surface (`9f5e25f`, `4779ae0`, `3bb7ddb`, `f59e940`).
 
 **Storage, decay, operations**
+- Capture hook hardening: the harness's scheduled-task wrapper marks automation, long sessions are distilled in windows, the watermark survives turns ageing out, compaction summaries and credentials never reach the model, one-sentence sessions still count, API trouble defers a capture instead of failing it (`779f537`, `042a454`, `b665028`, `fc4b785`, `12fca84`, `428b3da`, `dc4341b`).
+- Under a degraded network: every API attempt and the doctor's probe are wall-clock bounded, the probe result is cached for ten minutes, and `brain index` fails fast or skips embeddings while the API is known slow (`511534c`, `82e631d`, `8236aae`, `2280435`).
 - Embeddings are packed float32 (brain.db 28 MB → 9.6 MB), migrated on connect; exports still carry plain lists (`04b250f`).
 - `brain backup` takes consistent snapshots with rotation; the daily card takes one when the newest is stale and says so (`e1948b0`, `5964d1c`, `1dfb373`).
 - Decay: people and organisations are immortal only while they matter; an event does not fade before its date; top of mind = importance × recency (`3566621`, `1f54928`, `e2be6c2`).
