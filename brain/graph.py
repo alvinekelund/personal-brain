@@ -1,6 +1,5 @@
 """Graph traversal and context synthesis."""
 from pathlib import Path
-import json
 import re
 import math
 from collections import deque

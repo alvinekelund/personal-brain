@@ -173,7 +173,6 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
     # all but coincide ("Current Semester Start" beside "SM Data Science Start"
     # scored 0.896 on Sep 6 2026 while every name check passed). Parent/child
     # pairs are structure, not duplicates; no model call — the vectors are stored.
-    import json
     import math
     unit: dict[str, list[float]] = {}
     for nid, n in nodes.items():
