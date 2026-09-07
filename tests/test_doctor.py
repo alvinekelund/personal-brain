@@ -213,6 +213,21 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(doctor.check_api(offline).status, "warn")
         self.assertEqual(by_name(self.run_doctor())["gemini-api"].status, "ok")
 
+    def test_api_probe_gives_up_on_a_stalled_handshake(self):
+        """A socket timeout does not bound a stalled TLS handshake: the doctor
+        took 48 s at session start on Sep 6 2026. The probe is wall-clock capped."""
+        import time as _time
+        orig = doctor.API_PROBE_WALL_S
+        doctor.API_PROBE_WALL_S = 0.3
+        try:
+            t0 = _time.time()
+            c = doctor.check_api(lambda: _time.sleep(5))
+        finally:
+            doctor.API_PROBE_WALL_S = orig
+        self.assertLess(_time.time() - t0, 2.0)
+        self.assertEqual(c.status, "warn")
+        self.assertIn("no answer within", c.detail)
+
     def test_graph_tree_and_capture_checks(self):
         conn = db.connect()
         db.add_node(conn, "Loose fact", type_="fact")          # orphan → structural failure

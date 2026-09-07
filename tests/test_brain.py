@@ -1006,6 +1006,22 @@ class CitedSourcesTests(BrainTestCase):
         self.assertEqual(graph.sources_line({"cited": [], "sources": []}), "")
 
 
+class WallClockTests(BrainTestCase):
+    def test_a_stalled_attempt_cannot_outlive_its_budget(self):
+        """urlopen's timeout bounds one read, not a stalled handshake: an embed
+        attempt ran past its 45 s budget for minutes on Sep 6 2026."""
+        import time as _time, urllib.request
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = lambda *a, **k: _time.sleep(10)          # never answers
+        t0 = _time.time()
+        try:
+            with self.assertRaises((llm.BudgetExceeded, OSError, TimeoutError)):
+                llm._request(urllib.request.Request("https://example.invalid/"), timeout=0.2, budget=1.0)
+        finally:
+            urllib.request.urlopen = orig
+        self.assertLess(_time.time() - t0, 5.0)                             # bounded, not ten seconds per attempt
+
+
 class RedactionTests(BrainTestCase):
     def test_ingest_masks_credentials_before_the_model_and_the_log(self):
         """A pasted 'export GEMINI_API_KEY=…' reached the extractor and the

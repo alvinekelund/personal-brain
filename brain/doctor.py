@@ -79,6 +79,7 @@ def check_db(db_path: Path = DB_PATH, now: float | None = None) -> Check:
 
 
 API_PROBE_URL = "https://generativelanguage.googleapis.com/"
+API_PROBE_WALL_S = 8.0   # the session-start card must not hang on a stalled handshake (48 s on Sep 6 2026)
 
 
 def _default_probe():
@@ -92,7 +93,9 @@ def check_api(probe=None) -> Check:
     exactly what silently broke every ingest after the Sep 2026 venv move."""
     import urllib.error
     try:
-        (probe or _default_probe)()
+        llm._bounded(probe or _default_probe, API_PROBE_WALL_S)
+    except TimeoutError as e:
+        return Check("gemini-api", "warn", f"{e} — the network is slow; ingest and ask will crawl")
     except urllib.error.HTTPError:
         return Check("gemini-api", "ok", "TLS handshake ok")   # 404 on / is fine: we reached it
     except Exception as e:

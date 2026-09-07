@@ -83,6 +83,31 @@ def ssl_context() -> ssl.SSLContext:
         return ssl.create_default_context()
 
 
+def _bounded(fn, seconds: float):
+    """Run fn() in a worker thread and give up after `seconds` of wall-clock
+    time. A socket timeout bounds one blocking read, not a stalled DNS lookup
+    or TLS handshake: on Sep 6 2026 a single embed attempt ran past its 45 s
+    budget for minutes while the Gemini endpoint was degraded. The abandoned
+    worker is a daemon thread and dies with the process."""
+    import threading
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as e:   # noqa: BLE001 — re-raised on the caller's thread
+            box["error"] = e
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        raise TimeoutError(f"no answer within {seconds:.0f}s (wall clock)")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
 def _request(req, timeout, budget=None):
     """POST and parse JSON, retrying transient failures: 5xx, dropped
     connections, timeouts, and 429 rate limits (waiting out the quota window —
@@ -102,8 +127,10 @@ def _request(req, timeout, budget=None):
                 raise BudgetExceeded(f"{budget:.0f}s budget exhausted after {attempt} attempt(s)")
             per_try = min(timeout, remaining)
         try:
-            with urllib.request.urlopen(req, timeout=per_try, context=ssl_context()) as resp:
-                return json.loads(resp.read().decode())
+            def attempt_once(per_try=per_try):
+                with urllib.request.urlopen(req, timeout=per_try, context=ssl_context()) as resp:
+                    return json.loads(resp.read().decode())
+            return _bounded(attempt_once, per_try + 1.0)   # +1 s: the socket timeout gets first say
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < RETRIES:
                 wait = _retry_delay(e.read().decode(errors="replace"), attempt)
