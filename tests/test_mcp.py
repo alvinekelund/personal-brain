@@ -243,7 +243,7 @@ class ToolCallTests(MCPTestCase):
         result = call_tool("brain_ask", {"question": "where does Alvin live"})
         text = tool_text(result)
         self.assertIn("In Espoo.", text)
-        self.assertIn("sources: Espoo", text)
+        self.assertIn("cited: Espoo  (1 retrieved)", text)                 # the answer names it
 
     def test_context_synthesizes_document(self):
         self.seed("ML", content="machine learning studies")
@@ -324,7 +324,7 @@ class VaultIndexTests(MCPTestCase):
             llm.generate = self._orig_generate
         self.assertIn("Group CEO of Miracle.", text)
         self.assertIn("files: people/heli.md", text)
-        self.assertIn("sources: people/heli.md", text)
+        self.assertIn("retrieved (none cited): people/heli.md", text)   # the fake answer names nothing
 
 
 if __name__ == "__main__":

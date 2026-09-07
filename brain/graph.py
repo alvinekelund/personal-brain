@@ -1,6 +1,7 @@
 """Graph traversal and context synthesis."""
 from pathlib import Path
 import json
+import re
 import math
 from collections import deque
 from brain import db, decay, llm
@@ -375,9 +376,29 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
     for n in seeds:  # asking accesses these memories → reinforce them
         db.touch_node(conn, n["id"])
     conn.commit()
-    return {"answer": llm.generate(prompt).strip(),
-            "sources": ledger_sources + [f["path"] for f in files] + [n["name"] for n in seeds],
-            "files": [f["path"] for f in files]}
+    answer = llm.generate(prompt).strip()
+    sources = ledger_sources + [f["path"] for f in files] + [n["name"] for n in seeds]
+    return {"answer": answer, "sources": sources, "files": [f["path"] for f in files],
+            "cited": cited_sources(answer, sources)}
+
+
+def cited_sources(answer: str, sources: list) -> list:
+    """The retrieved sources the answer actually leans on — the ones it names
+    (ledger ids as whole tokens, file paths and node names as text). A question
+    about the fourth course seat retrieved 25 items and cited 4; the other 21
+    were noise on the sources line."""
+    low = (answer or "").lower()
+    out = []
+    for src in sources:
+        s = str(src).strip()
+        if not s or s in out:
+            continue
+        if re.fullmatch(r"[LD]-\d{3}", s):
+            if re.search(r"(?<![\w-])" + re.escape(s) + r"(?![\w-])", answer or ""):
+                out.append(s)
+        elif s.lower() in low:
+            out.append(s)
+    return out
 
 
 def file_context(conn, query: str, seeds: list, root=None, query_vector=None, n: int = 6):

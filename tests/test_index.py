@@ -454,7 +454,8 @@ class AnswerTests(IndexTestCase):
 
     def test_nothing_known_at_all(self):
         res = graph.answer_question(self.conn, "who is Heli?")
-        self.assertEqual(res, {"answer": "I don't have anything on that yet.", "sources": [], "files": []})
+        self.assertEqual(res["answer"], "I don't have anything on that yet.")
+        self.assertEqual((res["sources"], res["files"], res.get("cited", [])), ([], [], []))
 
 
 if __name__ == "__main__":

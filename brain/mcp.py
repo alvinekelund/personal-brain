@@ -203,8 +203,11 @@ def _ask(conn, args):
     out = res["answer"]
     if res.get("files"):
         out += "\n\nfiles: " + ", ".join(res["files"])
-    if res["sources"]:
-        out += "\nsources: " + ", ".join(res["sources"])
+    cited, sources = res.get("cited") or [], res.get("sources") or []
+    if cited:
+        out += f"\ncited: {', '.join(cited)}  ({len(sources)} retrieved)"
+    elif sources:
+        out += "\nretrieved (none cited): " + ", ".join(sources[:8])
     return out
 
 

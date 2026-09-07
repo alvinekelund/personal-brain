@@ -919,6 +919,18 @@ class ServerApiTests(BrainTestCase):
         self.assertIn("football", text)
 
 
+class CitedSourcesTests(BrainTestCase):
+    def test_cited_is_what_the_answer_names(self):
+        """A fourth-seat question retrieved 25 items (six decisions among them)
+        and the answer cited four; the sources line showed all 25."""
+        sources = ["D-001", "D-002", "L-001", "L-010", "areas/harvard.md", "courses/README.md", "MIT 9.522", "Job Search"]
+        answer = ("Both contenders are approved (L-001, areas/harvard.md). MIT 9.522 is exam-free "
+                  "(courses/README.md). Nothing here concerns L-0100 or D-00.")
+        self.assertEqual(graph.cited_sources(answer, sources), ["L-001", "areas/harvard.md", "courses/README.md", "MIT 9.522"])
+        self.assertEqual(graph.cited_sources("", sources), [])
+        self.assertEqual(graph.cited_sources("mit 9.522 in lower case", ["MIT 9.522"]), ["MIT 9.522"])   # names match case-insensitively
+
+
 class LinkEntitiesTests(BrainTestCase):
     def test_linker_sees_descriptions_and_matches_by_what_things_are(self):
         """'Harvard Degree Program' was extracted beside the existing 'Data Science
