@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import date
 import brain
 import brain.config as config
 import brain.db as db
@@ -114,6 +115,26 @@ class DecayClockTests(BrainTestCase):
         self.assertIn("part_of", rows)
         self.assertNotIn("relates_to", rows)
         self.assertAlmostEqual(rows["part_of"], decay.EDGE_MIN_WEIGHT, places=6)
+
+    def test_upcoming_events_do_not_fade_before_their_date(self):
+        """HackMIT (Sep 19-20) and the Glasswing hackathon (Sep 26-27) sat at
+        weight 0.89 on Sep 6 2026, weeks before they happened: an event decays
+        from its creation, not from its date. Now it holds until the date."""
+        import time as _time
+        hack = db.add_node(self.conn, "HackMIT 2026", type_="event", importance=0.3,
+                           content="A hackathon running September 19-20, 2026 on the MIT campus.")
+        past = db.add_node(self.conn, "Grandfather's Funeral", type_="event", importance=0.3,
+                           content="Held in Helsinki on May 12, 2026.")
+        self._age(hack, 60); self._age(past, 60)
+        decay.run_decay(self.conn, now=_time.time())                          # today: Sep 6 2026
+        self.assertEqual(db.get_node(self.conn, hack)["weight"], 1.0)         # still ahead: untouched
+        self.assertLess(db.get_node(self.conn, past)["weight"], 1.0)          # over: fades
+        self.assertTrue(decay.upcoming("Sept 19th, 2026", date(2026, 9, 6)))
+        self.assertFalse(decay.upcoming("Sept 19th, 2026", date(2026, 9, 21)))
+        self.assertTrue(decay.upcoming("due on October 4", date(2026, 9, 6)))   # no year: this year
+        self.assertFalse(decay.upcoming("no date here", date(2026, 9, 6)))
+        decay.run_decay(self.conn, now=_time.time() + 20 * 86400)             # Sep 26: the hackathon is over
+        self.assertLess(db.get_node(self.conn, hack)["weight"], 1.0)
 
     def test_access_resets_the_clock(self):
         nid = db.add_node(self.conn, "Thing", type_="concept", importance=0.0)

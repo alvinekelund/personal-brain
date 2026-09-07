@@ -1,5 +1,7 @@
 import math
+import re
 import time
+from datetime import date as _date
 
 EDGE_BASE_HALF_LIFE = 90.0   # days for a once-seen edge
 EDGE_MIN_WEIGHT = 0.05       # below this, delete the edge — except the part_of spine, which is clamped
@@ -15,13 +17,44 @@ IMMORTAL_MIN_IMPORTANCE = 0.4
 DEMOTED_HALF_LIFE = 60.0
 
 
-def node_half_life(half_life_days: float, node_type: str, importance: float) -> float:
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july",
+                                       "august", "september", "october", "november", "december"), 1)}
+_MONTHS.update({m[:3]: i for m, i in list(_MONTHS.items())})
+_MONTHS["sept"] = 9
+_DATE_RE = re.compile(r"\b([A-Za-z]{3,9})\.? (\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?(?:st|nd|rd|th)?(?:,? ((?:19|20)\d\d))?\b")
+
+
+def upcoming(content: str, today=None) -> bool:
+    """Does the content name a date that is still ahead? HackMIT (Sep 19-20)
+    and the Glasswing hackathon (Sep 26-27) were fading at weight 0.89 on
+    Sep 6 2026, weeks before they happened: an event decays from its creation,
+    not from its date. A missing year means this year; a range counts its end."""
+    today = today or _date.today()
+    for m in _DATE_RE.finditer(content or ""):
+        month = _MONTHS.get(m.group(1).lower())
+        if not month:
+            continue
+        day = int(m.group(3) or m.group(2))
+        year = int(m.group(4)) if m.group(4) else today.year
+        try:
+            when = _date(year, month, day)
+        except ValueError:
+            continue
+        if when >= today:
+            return True
+    return False
+
+
+def node_half_life(half_life_days: float, node_type: str, importance: float,
+                   content: str | None = None, today=None) -> float:
     """The half-life decay actually uses for a node: the stored one, except that
     an immortal (inf) person/organization below IMMORTAL_MIN_IMPORTANCE gets
     DEMOTED_HALF_LIFE. Categories are never demoted."""
     if (math.isinf(half_life_days) and node_type != "category"
             and (importance or 0.0) < IMMORTAL_MIN_IMPORTANCE):
         return DEMOTED_HALF_LIFE
+    if node_type == "event" and content and upcoming(content, today):
+        return float("inf")      # not before it has happened
     return half_life_days
 
 
@@ -56,7 +89,7 @@ def at_risk_nodes(conn, limit: int = 5, threshold: float = ARCHIVE_THRESHOLD) ->
     cands = []
     for r in rows:
         imp = r["importance"] if "importance" in r.keys() else 0.0
-        hl = node_half_life(r["half_life_days"], r["type"], imp)
+        hl = node_half_life(r["half_life_days"], r["type"], imp, r["content"] if "content" in r.keys() else None)
         if math.isinf(hl):
             continue  # immortal: person/org that matters, or a category
         days = days_until_archive(r["weight"], hl, threshold, imp)
@@ -95,7 +128,7 @@ def edge_half_life(reinforcement_count: int) -> float:
     return EDGE_BASE_HALF_LIFE * math.log1p(reinforcement_count)
 
 
-def run_decay(conn) -> dict:
+def run_decay(conn, now: float | None = None) -> dict:
     """
     Update weights for all non-archived nodes and all edges.
     Archive nodes below 0.10, delete nodes archived 7+ days.
@@ -103,11 +136,12 @@ def run_decay(conn) -> dict:
     Returns counts of updated / archived / deleted nodes + edges pruned.
     """
     nodes = conn.execute(
-        "SELECT id, type, weight, last_accessed, last_decayed, half_life_days, archived, importance FROM nodes"
+        "SELECT id, type, weight, last_accessed, last_decayed, half_life_days, archived, importance, content FROM nodes"
     ).fetchall()
 
     updated = archived = deleted = edges_pruned = 0
-    now = time.time()
+    now = now or time.time()
+    today = _date.fromtimestamp(now)
 
     for n in nodes:
         if n["archived"]:
@@ -124,7 +158,7 @@ def run_decay(conn) -> dict:
         # that reset it), so decay only the interval since then. Calling decay
         # twice in a row is then a no-op instead of a second full decay.
         since = max(n["last_decayed"], n["last_accessed"])
-        hl = node_half_life(n["half_life_days"], n["type"], n["importance"])
+        hl = node_half_life(n["half_life_days"], n["type"], n["importance"], n["content"], today)
         new_w = current_weight(n["weight"], since, hl, n["importance"])
         new_w = max(0.0, min(1.0, new_w))
 
