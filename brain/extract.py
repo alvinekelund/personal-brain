@@ -362,6 +362,18 @@ def _neighbour_parent(conn, db, node, identity_id: str):
     return None
 
 
+def _by_name(conn, name):
+    """An existing node by name — revived if it had been forgotten: the text
+    names it again, and a parent or a match that stays archived leaves the new
+    knowledge outside the active tree."""
+    from brain import db
+    row = db.get_node_by_name(conn, name)
+    if row and row["archived"]:
+        db.revive_node(conn, row["id"])
+        row = db.get_node(conn, row["id"])
+    return row
+
+
 def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, user: str):
     """Build the hierarchy spine and enforce that it's a real tree:
 
@@ -373,10 +385,10 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
     Returns (new_node_ids, new_edge_ids).
     """
     new_nodes, new_edges = [], []
-    identity = db.get_node_by_name(conn, user) if user else None
+    identity = _by_name(conn, user) if user else None
 
     def ensure_category(name):
-        cat = db.get_node_by_name(conn, name)
+        cat = _by_name(conn, name)
         if cat:
             cid = cat["id"]
         else:
@@ -400,7 +412,7 @@ def _attach_parents(conn, db, extracted: dict, name_to_id: dict, source: str, us
             continue
         parent_id = name_to_id.get(parent)
         if not parent_id:
-            existing = db.get_node_by_name(conn, parent)
+            existing = _by_name(conn, parent)
             parent_id = existing["id"] if existing else ensure_category(parent)
         if parent_id and parent_id != child_id:
             # one part_of parent per node: the planned parent replaces any other
@@ -572,7 +584,7 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
             if not name:
                 continue
             canonical = entity_links.get(name, name)
-            if db.get_node_by_name(conn, canonical):
+            if _by_name(conn, canonical):
                 continue
             cands.append((canonical.lower(), f"{canonical}. {n.get('content', '')}"))
         if cands:
@@ -606,7 +618,7 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
         # resolve through entity linker first, then fall back to name match
         canonical = entity_links.get(name, name)
         type_ = n.get("type", "concept")
-        existing = db.get_node_by_name(conn, canonical)
+        existing = _by_name(conn, canonical)
         vec = embeds_cache.get(canonical.lower())
 
         if not existing and vec is not None:
@@ -766,7 +778,7 @@ def _subgroup_one(conn, db, cat, children):
         members = [m for m in members if m]
         if not gname or gname.lower() == cat["name"].lower() or len(members) < 2:
             continue
-        existing = db.get_node_by_name(conn, gname)
+        existing = _by_name(conn, gname)
         sub_id = existing["id"] if existing else db.add_node(
             conn, name=gname, type_="category", source="subgroup", importance=0.8)
         db.add_edge(conn, sub_id, cat["id"], "part_of")  # sub-category under the category

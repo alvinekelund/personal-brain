@@ -986,6 +986,37 @@ class CitedSourcesTests(BrainTestCase):
         self.assertEqual(graph.sources_line({"cited": [], "sources": []}), "")
 
 
+class RevivalTests(BrainTestCase):
+    def test_ingest_revives_a_forgotten_parent_and_match(self):
+        """`brain forget Poker` at 21:00; at 23:00 another session ingested a
+        poker trainer whose parent was Poker — the archived node was used as the
+        parent and the new concept became an orphan of the active tree."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        hobbies = db.add_node(self.conn, "Hobbies", type_="category"); db.add_edge(self.conn, hobbies, me, "part_of")
+        poker = db.add_node(self.conn, "Poker", type_="concept", content="A card game."); db.add_edge(self.conn, poker, hobbies, "part_of")
+        db.archive_node(self.conn, poker)
+        self.conn.execute("UPDATE nodes SET weight = 0.2 WHERE id = ?", (poker,))
+        self.conn.commit()
+        responses = iter([json.dumps({"nodes": [
+            {"name": "Full Ring Coach", "type": "artifact", "content": "A poker trainer app.", "parent": "Poker", "importance": 0.5},
+            {"name": "Poker", "type": "concept", "content": "Alvin plays poker with friends.", "parent": "Hobbies", "importance": 0.5}],
+            "edges": []}), "{}"])
+        orig = llm.generate
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        try:
+            node_ids, _ = extract.ingest(self.conn, "Alvin built Full Ring Coach, a poker trainer.", user="Alvin", inbox_root=False)
+        finally:
+            llm.generate = orig
+        again = db.get_node(self.conn, poker)
+        self.assertEqual(again["archived"], 0)                                  # named again: back
+        self.assertEqual(again["weight"], 1.0)
+        app = db.get_node_by_name(self.conn, "Full Ring Coach")
+        self.assertEqual(db.parent_of(self.conn, app["id"])["id"], poker)        # filed under the revived node
+        import brain.integrity as integrity
+        self.assertEqual(integrity.check(self.conn, "Alvin").orphans, [])
+
+
 class LinkEntitiesTests(BrainTestCase):
     def test_linker_sees_descriptions_and_matches_by_what_things_are(self):
         """'Harvard Degree Program' was extracted beside the existing 'Data Science

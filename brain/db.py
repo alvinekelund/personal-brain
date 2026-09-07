@@ -382,6 +382,14 @@ def archive_node(conn, node_id):
     conn.execute("UPDATE nodes SET archived = 1 WHERE id = ?", (node_id,))
 
 
+def revive_node(conn, node_id):
+    """Bring an archived node back: new knowledge named it, so it matters again.
+    Ingest filed 'Optimal Poker Decision-Making' under a forgotten 'Poker' on
+    Sep 6 2026 and the new node became an orphan of the active tree."""
+    conn.execute("UPDATE nodes SET archived = 0, weight = 1.0, last_accessed = ?, last_decayed = ? WHERE id = ?",
+                 (now(), now(), node_id))
+
+
 def delete_node(conn, node_id):
     """Delete a node and every edge touching it — the schema has no ON DELETE
     CASCADE, so without this a deleted node leaves dangling edges behind."""
