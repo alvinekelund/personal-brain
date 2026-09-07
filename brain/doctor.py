@@ -88,6 +88,21 @@ def _default_probe():
     urllib.request.urlopen(API_PROBE_URL, timeout=6, context=llm.ssl_context())
 
 
+def api_known_slow(cache: Path | None = None, now: float | None = None) -> str:
+    """The cached probe's verdict when it is fresh and not ok — '' otherwise.
+    Lets `brain index` skip embeddings outright instead of spending a whole
+    embed budget to learn what the last doctor already knew."""
+    cache = DATA_DIR / "api-probe.json" if cache is None else cache
+    now = now or time.time()
+    try:
+        c = json.loads(Path(cache).read_text(encoding="utf-8"))
+        if now - float(c.get("ts", 0)) < API_PROBE_CACHE_S and c.get("status") in ("warn", "fail"):
+            return str(c.get("detail", "API slow"))
+    except (OSError, ValueError, TypeError):
+        pass
+    return ""
+
+
 def check_api(probe=None, cache: Path | None = None, now: float | None = None) -> Check:
     """Can we actually complete a TLS handshake with the Gemini host? A missing
     CA bundle (python.org builds) fails here long before any key is checked —

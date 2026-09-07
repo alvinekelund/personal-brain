@@ -163,6 +163,24 @@ class CliTests(BrainTestCase):
         views = "".join(f.read_text() for f in (self.vault_tmp / "graph").glob("*.md"))
         self.assertNotIn("Padel", views)                                       # rendered after the archive
 
+    def test_index_skips_embeddings_when_the_api_is_known_slow(self):
+        """A fail-fast index still spent a whole embed budget (46 s) to learn
+        what the last doctor had just found; the probe cache says it for free."""
+        import json, tempfile, time
+        import brain.doctor as doctor
+        import brain.llm as llm
+        orig_dir, orig_key, orig_embed = doctor.DATA_DIR, llm.have_key, llm.embed
+        doctor.DATA_DIR = Path(tempfile.mkdtemp())
+        (doctor.DATA_DIR / "api-probe.json").write_text(json.dumps({"ts": time.time(), "status": "warn", "detail": "no answer within 8s"}))
+        llm.have_key = lambda: True
+        llm.embed = lambda *a, **k: self.fail("must not embed while the API is known slow")
+        try:
+            r = self.run_cli("index")
+        finally:
+            doctor.DATA_DIR, llm.have_key, llm.embed = orig_dir, orig_key, orig_embed
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("skipping embeddings", r.output)
+
     def test_prune_deletes_archived_nodes_and_says_which(self):
         self.run_cli("forget", "Padel")
         r = self.run_cli("prune")

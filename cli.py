@@ -474,7 +474,10 @@ def index_cmd(no_embed, show_status):
             for p in items[:20]:
                 click.echo(f"  {label}: {p}")
         return
-    s = vindex.build(conn, root, embed=not no_embed)
+    slow = "" if no_embed else doctor_mod.api_known_slow()
+    if slow:
+        click.echo(f"  skipping embeddings: the last probe found the API slow ({slow[:60]}) — `brain index` again later", err=True)
+    s = vindex.build(conn, root, embed=not no_embed and not slow)
     click.echo(f"Indexed {s['files']} vault file(s): {s['added']} added, {s['updated']} updated, "
                f"{s['removed']} removed, {s['unchanged']} unchanged · {s['links']} file link(s), "
                f"{s['node_links']} node link(s), {s['embedded']} embedded · "
