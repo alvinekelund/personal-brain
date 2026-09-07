@@ -411,13 +411,16 @@ def decay_cmd():
 
 @cli.command()
 def prune():
-    """Delete all archived nodes immediately."""
+    """Delete all archived nodes now (decay would after 7 days). A pruned node is
+    gone for good; an archived one still comes back when new knowledge names it."""
     conn = db.connect()
-    rows = conn.execute("SELECT id FROM nodes WHERE archived=1").fetchall()
+    rows = conn.execute("SELECT id, name FROM nodes WHERE archived=1").fetchall()
     for r in rows:
         db.delete_node(conn, r["id"])
     conn.commit()
-    click.echo(f"Pruned {len(rows)} archived node(s).")
+    if rows:
+        vault.auto_render(conn, config.get_user(), commit=f"prune: {len(rows)} archived node(s) deleted")
+    click.echo(f"Pruned {len(rows)} archived node(s)." + (" " + ", ".join(r["name"] for r in rows[:6]) if rows else ""))
 
 
 # ── clear ─────────────────────────────────────────────────────────────────────

@@ -152,6 +152,14 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_prune_deletes_archived_nodes_and_says_which(self):
+        self.run_cli("forget", "Padel")
+        r = self.run_cli("prune")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("Pruned 1 archived node(s). Padel", r.output)
+        self.assertIsNone(db.get_node(self.conn, self.padel))
+        self.assertIn("Pruned 0 archived node(s).", self.run_cli("prune").output)
+
     def test_unlink_removes_cross_links_but_never_the_spine(self):
         """Merging 'Boston area' into the residence fact re-pointed its edges,
         leaving 'Alvin's MIT Identity located_at Alvin's Residence' behind with
