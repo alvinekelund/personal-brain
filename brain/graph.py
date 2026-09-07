@@ -272,6 +272,8 @@ def semantic_search(conn, query_vector: list, min_weight: float = 0.0, limit: in
     """
     scored = []
     for r in db.all_nodes(conn, min_weight=min_weight):
+        if r["type"] == "category":
+            continue   # structure, not knowledge: "who was my former boss" ranked Career, Relationships, Companies first
         emb = r["embedding"] if "embedding" in r.keys() else None
         if not emb:
             continue

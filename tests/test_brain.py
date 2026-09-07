@@ -1102,6 +1102,20 @@ class SearchTests(BrainTestCase):
         self.assertEqual(db.search_nodes(self.conn, "the of and"), [])
 
 
+class SemanticSearchTests(BrainTestCase):
+    def test_categories_are_never_semantic_hits(self):
+        """`brain query --semantic "who was my former boss"` returned the
+        categories Career, Relationships and Companies & Organizations on
+        Sep 6 2026 — their name embeddings sit close to every generic question."""
+        cat = db.add_node(self.conn, "Career", type_="category")
+        heli = db.add_node(self.conn, "Heli Helskyaho", type_="person", content="Alvin's former boss.")
+        db.set_embedding(self.conn, cat, [1.0, 0.0])
+        db.set_embedding(self.conn, heli, [0.9, 0.1])
+        self.conn.commit()
+        hits = graph.semantic_search(self.conn, [1.0, 0.0], limit=5)
+        self.assertEqual([r["name"] for _, r in hits], ["Heli Helskyaho"])
+
+
 class SearchRankingTests(BrainTestCase):
     def test_the_thing_itself_outranks_things_that_mention_it(self):
         """`brain query 9.522` ranked MIT and 6.C57 (whose contents cite 9.522)
