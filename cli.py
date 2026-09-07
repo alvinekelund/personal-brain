@@ -218,18 +218,9 @@ def ask(question):
     click.echo(res["answer"])
     if res.get("files"):
         click.echo("\nfiles: " + ", ".join(res["files"]))
-    click.echo(_sources_line(res))
-
-
-def _sources_line(res: dict) -> str:
-    """'cited: …' — what the answer leans on — plus how much was retrieved; the
-    full retrieved list only when the answer cited nothing (so it can be judged)."""
-    cited, sources = res.get("cited") or [], res.get("sources") or []
-    if cited:
-        return f"cited: {', '.join(cited)}  ({len(sources)} retrieved)"
-    if sources:
-        return "retrieved (none cited): " + ", ".join(sources[:8]) + (f", … {len(sources) - 8} more" if len(sources) > 8 else "")
-    return ""
+    line = graph.sources_line(res)
+    if line:
+        click.echo(line)
 
 
 # ── context ───────────────────────────────────────────────────────────────────

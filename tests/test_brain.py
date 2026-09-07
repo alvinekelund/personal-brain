@@ -943,6 +943,10 @@ class CitedSourcesTests(BrainTestCase):
         self.assertEqual(graph.cited_sources("", sources), [])
         self.assertEqual(graph.cited_sources("mit 9.522 in lower case", ["MIT 9.522"]), ["MIT 9.522"])   # names match case-insensitively
         self.assertEqual(graph.cited_sources("Alvin lives in Cambridge (ALVIN.md).", ["Alvin", "ALVIN.md"], owner="Alvin"), ["ALVIN.md"])   # the owner's name is in every answer
+        self.assertEqual(graph.sources_line({"cited": ["L-001"], "sources": ["L-001", "D-002"]}), "cited: L-001  (2 retrieved)")
+        self.assertEqual(graph.sources_line({"cited": [], "sources": [f"S{i}" for i in range(10)]}),
+                         "retrieved (none cited): S0, S1, S2, S3, S4, S5, S6, S7, … 2 more")
+        self.assertEqual(graph.sources_line({"cited": [], "sources": []}), "")
 
 
 class LinkEntitiesTests(BrainTestCase):
