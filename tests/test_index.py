@@ -182,6 +182,31 @@ class BuildTests(IndexTestCase):
         index.build(self.conn, self.root, embed=False)
         self.assertIsNone(db.get_node(self.conn, heli)["path"])
 
+    def test_app_file_outranks_an_area_alias_for_the_node_path(self):
+        """apps/business-ledger.md is typed `artifact` (its node type), which gave
+        it no ranking priority, so the business area's alias "business ledger"
+        won the node's path on Sep 6 2026. The shelf decides the kind."""
+        w(self.root / "apps/business-ledger.md",
+          "---\napp: business-ledger\nname: Business Ledger\ntype: artifact\nupdated: 2026-09-03\n---\n# Business Ledger\n- Ledger app.\n")
+        w(self.root / "areas/business.md",
+          "---\ntype: area\narea: business\naliases: [siemens, invoice, business ledger]\nupdated: 2026-09-05\n---\n# Business\n## Now\n- x\n")
+        self.assertEqual(index.kind_of("apps/business-ledger.md", {"type": "artifact"}), "app")
+        node = db.add_node(self.conn, "Business Ledger", type_="artifact")
+        self.conn.commit()
+        index.build(self.conn, self.root, embed=False)
+        self.assertEqual(db.get_node(self.conn, node)["path"], "apps/business-ledger.md")
+
+    def test_qualified_node_name_links_by_its_bare_name(self):
+        w(self.root / "projects/walkthrough.md",
+          "---\ntype: project\nname: Walkthrough, Junction 2025 (Top 5 overall, 2nd Snap Spectacles track)\n"
+          "aliases: [Walkthrough, Junction, Money Badgers]\nupdated: 2026-09-04\n---\n# Walkthrough\n- AR grocery companion.\n")
+        node = db.add_node(self.conn, "Walkthrough (Junction 2025)", type_="project")
+        self.conn.commit()
+        index.build(self.conn, self.root, embed=False)
+        self.assertEqual(db.get_node(self.conn, node)["path"], "projects/walkthrough.md")
+        names = index._node_name_map(self.conn)
+        self.assertEqual(len(names["walkthrough"]), 1)                      # keyed once, not per rule
+
     def test_school_prefixed_node_links_to_the_course_file(self):
         """The graph names courses "MIT 9.522" / "Harvard STAT 211" while a
         course file's alias is the bare code — five real nodes were unlinked

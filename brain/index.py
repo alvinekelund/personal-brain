@@ -117,7 +117,10 @@ def kind_of(rel: str, fm: dict) -> str:
         return ROOT_KIND.get(parts[0], t or "note")
     if parts[-1] == "README.md":
         return "readme"
-    return t or SHELF_KIND.get(parts[0], "note")
+    # the shelf decides: an app file typed `artifact` (its node type) is still an
+    # "app" for ranking and linking — as "artifact" it had no priority at all, so
+    # an area whose aliases mention the app won the node's path
+    return SHELF_KIND.get(parts[0]) or t or "note"
 
 
 def tokens_of(text: str) -> set[str]:
@@ -172,6 +175,7 @@ def parse_file(root: Path, path: Path) -> dict:
 # ── building the index ────────────────────────────────────────────────────────
 
 _SCHOOL_PREFIX = re.compile(r"^(?:mit|harvard|aalto|stanford)\s+")
+_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")   # "Walkthrough (Junction 2025)" → "Walkthrough"
 # a who-question wants people: boost person files that match at all, and keep
 # a few of them in the result even when bigger files out-score them
 _WHO_RE = re.compile(r"\b(?:who|whom|whose|people|persons?|friends?|colleagues?|classmates?|contacts?)\b")
@@ -190,14 +194,16 @@ _QUERY_STOP = {
 def _node_name_map(conn) -> dict[str, list]:
     """normalized node name → [node rows] (active nodes only). A node named
     with a school in front ("MIT 9.522", "Harvard AM 207") is also keyed by
-    the bare code, so a file whose alias is "9.522" still links to it."""
+    the bare code, so a file whose alias is "9.522" still links to it; one
+    with a trailing qualifier ("Walkthrough (Junction 2025)") is also keyed
+    by the bare name, so a file aliased "Walkthrough" links to it."""
     out: dict[str, list] = {}
     for n in db.all_nodes(conn):
         key = _norm(n["name"])
         out.setdefault(key, []).append(n)
-        bare = _SCHOOL_PREFIX.sub("", key)
-        if bare != key and len(bare) >= 3:
-            out.setdefault(bare, []).append(n)
+        for bare in (_SCHOOL_PREFIX.sub("", key), _norm(_QUALIFIER.sub("", n["name"]))):
+            if bare != key and len(bare) >= 3 and n not in out.setdefault(bare, []):
+                out[bare].append(n)
     return out
 
 
