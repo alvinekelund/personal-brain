@@ -94,7 +94,7 @@ class IntegrityTests(BrainTestCase):
         self.assertIn("brain move <area> <broader>", r.summary())
         self.assertEqual(r.fact_parents, [("Alvin's Residence (US)", ["Alvin's computer"]),
                                           ("MIT identity", ["Life Events"])])           # the mis-rooted category counts too
-        self.assertIn("1 fact(s) used as a parent: Alvin's Residence (US) ← Alvin's computer (a fact is a leaf", r.summary())
+        self.assertIn("2 fact(s) used as a parent: Alvin's Residence (US) ← Alvin's computer, MIT identity ← Life Events (a fact is a leaf", r.summary())
         self.assertGreater(r.missing_embeddings, 0)
         self.assertEqual(r.dangling_edges, 1)
         self.assertIn("1 dangling edge", r.summary())
