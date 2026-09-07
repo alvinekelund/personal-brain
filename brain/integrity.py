@@ -441,7 +441,8 @@ def repair(conn, user: str) -> dict:
 # ── content integrity: claims that stopped being true ─────────────────────────
 STALE_CLAIM_DAYS = 30
 _PLAN_TENSE = re.compile(r"\b(plans? to|planning to|is currently|currently|intends? to|wants? to|"
-                         r"is trying to|is considering|will be|upcoming|soon)\b", re.I)
+                         r"is trying to|is considering|will (?:be|begin|start|move|join|attend|apply|submit|take|"
+                         r"relocate|enroll|finish|graduate)|upcoming|soon)\b", re.I)
 _DATED = re.compile(r"\bas of\b", re.I)
 _MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july",
                                        "august", "september", "october", "november", "december"), 1)}

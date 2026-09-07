@@ -241,17 +241,18 @@ class IntegrityTests(BrainTestCase):
         older = db.add_node(c, "Harvard", type_="organization", content="A university where Alvin plans to pursue studies.")
         dated = db.add_node(c, "IRONMAN Barcelona", type_="event", content="As of June 2026 Alvin plans to race sub-10.")
         fresh = db.add_node(c, "Apple Cash", type_="concept", content="Alvin is currently trying to set it up.")
+        will = db.add_node(c, "Graduation", type_="event", content="Alvin will graduate at the end of 2027.")   # undated future
         done = db.add_node(c, "AC 215", type_="concept", content="Alvin took AC 215 in fall 2026.")
         cat = db.add_node(c, "Plans", type_="category", content="Things Alvin plans to do.")
-        for nid, age in ((old, 91), (older, 95), (dated, 95), (fresh, 3), (done, 95), (cat, 95)):
+        for nid, age in ((old, 91), (older, 95), (dated, 95), (fresh, 3), (done, 95), (cat, 95), (will, 40)):
             c.execute("UPDATE nodes SET created_at = ? WHERE id = ?", (now - age * 86400, nid))
         c.commit()
         rows = integrity.stale_claims(c, now=now)
-        self.assertEqual(rows, [("Harvard", "plans to", 95), ("Move to Boston", "plans to", 91)])
+        self.assertEqual(rows, [("Harvard", "plans to", 95), ("Move to Boston", "plans to", 91), ("Graduation", "will graduate", 40)])
         self.assertEqual(integrity.stale_claims(c, days=2, now=now)[-1][0], "Apple Cash")   # a shorter window catches the fresh one
         db.set_content(c, old, "Alvin moved to Cambridge, MA on 24 Aug 2026 for the Harvard SM in Data Science.")
         c.commit()
-        self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=now)], ["Harvard"])  # a restatement clears it
+        self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=now)], ["Harvard", "Graduation"])  # a restatement clears it
 
     def test_dated_future_claims_go_stale_the_day_after(self):
         """'Alvin will begin his classes on September 2' was six days old and
