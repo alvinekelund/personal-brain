@@ -207,6 +207,48 @@ class BuildTests(IndexTestCase):
         names = index._node_name_map(self.conn)
         self.assertEqual(len(names["walkthrough"]), 1)                      # keyed once, not per rule
 
+    def test_contains_and_inherited_links_reach_the_nodes_exact_names_miss(self):
+        """35 important nodes had no vault file on Sep 6 2026 although the file
+        existed: 'HackMIT 2026' beside alias 'HackMIT', 'Bain ACI Application'
+        beside alias 'Bain ACI', 'Treasurer of Aalto Triathlon Club' under the
+        club that has a file. Year-stripped exact, multi-word containment and
+        inheritance from the parent entity link them; single words never do."""
+        w(self.root / "applications/hackmit.md",
+          "---\ntype: application\nname: HackMIT 2026 (Sep 19-20) with Liam\naliases: [HackMIT, Plume]\nupdated: 2026-09-04\n---\n# HackMIT\n- x\n")
+        w(self.root / "applications/bain-aci.md",
+          "---\ntype: application\nname: Bain & Company, Associate Consultant Intern, Summer 2027\naliases: [Bain ACI, ACI]\nupdated: 2026-09-04\n---\n# Bain\n- x\n")
+        w(self.root / "orgs/bain.md",
+          "---\ntype: org\nname: Bain & Company\naliases: [Bain]\nupdated: 2026-09-04\n---\n# Bain & Company\n- x\n")
+        w(self.root / "orgs/atc.md",
+          "---\ntype: org\nname: Aalto Triathlon Club\naliases: [ATC]\nupdated: 2026-09-04\n---\n# ATC\n- x\n")
+        w(self.root / "orgs/harvard.md",
+          "---\ntype: org\nname: Harvard University (IACS / SEAS)\naliases: [Harvard, IACS]\nupdated: 2026-09-04\n---\n# Harvard\n- x\n")
+        hack = db.add_node(self.conn, "HackMIT 2026", type_="event")
+        bain_app = db.add_node(self.conn, "Bain ACI Application", type_="project")
+        bain = db.add_node(self.conn, "Bain & Company", type_="organization")
+        aci = db.add_node(self.conn, "ACI review", type_="event")                          # single-word alias: no
+        club = db.add_node(self.conn, "Aalto Triathlon Club", type_="organization")
+        treasurer = db.add_node(self.conn, "Treasurer of Aalto Triathlon Club", type_="fact")
+        db.add_edge(self.conn, treasurer, club, "part_of")
+        kit = db.add_node(self.conn, "Team kit", type_="artifact"); db.add_edge(self.conn, kit, club, "part_of")
+        order = db.add_node(self.conn, "Autumn 2026 order", type_="event"); db.add_edge(self.conn, order, kit, "part_of")
+        hfcu = db.add_node(self.conn, "Harvard Federal Credit Union", type_="organization")   # "Harvard" alone: no
+        venmo = db.add_node(self.conn, "Alvin's Venmo account", type_="artifact")            # the owner's name: no
+        self.conn.commit()
+        index.build(self.conn, self.root, embed=False)
+        path = lambda nid: db.get_node(self.conn, nid)["path"]
+        self.assertEqual(path(hack), "applications/hackmit.md")                # year-stripped exact
+        self.assertEqual(path(bain_app), "applications/bain-aci.md")           # longest multi-word alias, not the org
+        self.assertEqual(path(bain), "orgs/bain.md")
+        self.assertIsNone(path(aci))
+        self.assertEqual(path(treasurer), "orgs/atc.md")                       # inherited from the club
+        self.assertEqual(path(order), "orgs/atc.md")                           # two hops up
+        self.assertIsNone(path(hfcu))
+        self.assertIsNone(path(venmo))
+        hows = {(r[0], r[1]) for r in self.conn.execute(
+            "SELECT node_id, how FROM vault_file_nodes WHERE node_id IN (?, ?, ?, ?)", (hack, bain_app, treasurer, order))}
+        self.assertEqual(hows, {(hack, "alias"), (bain_app, "contains"), (treasurer, "contains"), (order, "inherited")})
+
     def test_school_prefixed_node_links_to_the_course_file(self):
         """The graph names courses "MIT 9.522" / "Harvard STAT 211" while a
         course file's alias is the bare code — five real nodes were unlinked

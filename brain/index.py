@@ -176,6 +176,14 @@ def parse_file(root: Path, path: Path) -> dict:
 
 _SCHOOL_PREFIX = re.compile(r"^(?:mit|harvard|aalto|stanford)\s+")
 _QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")   # "Walkthrough (Junction 2025)" → "Walkthrough"
+_YEAR_TAIL = re.compile(r"(?:\s+(?:19|20)\d\d)+\s*$")   # "HackMIT 2026" → "HackMIT"
+CONTAIN_KINDS = {"person", "org", "project", "course", "application", "profile", "topic", "app", "area", "doc"}
+INHERIT_HOPS = 8
+
+
+def _bare(name: str) -> str:
+    """A name without its trailing qualifier and year(s), normalized."""
+    return _norm(_YEAR_TAIL.sub("", _QUALIFIER.sub("", name or "")))
 # a who-question wants people: boost person files that match at all, and keep
 # a few of them in the result even when bigger files out-score them
 _WHO_RE = re.compile(r"\b(?:who|whom|whose|people|persons?|friends?|colleagues?|classmates?|contacts?)\b")
@@ -201,36 +209,92 @@ def _node_name_map(conn) -> dict[str, list]:
     for n in db.all_nodes(conn):
         key = _norm(n["name"])
         out.setdefault(key, []).append(n)
-        for bare in (_SCHOOL_PREFIX.sub("", key), _norm(_QUALIFIER.sub("", n["name"]))):
+        for bare in (_SCHOOL_PREFIX.sub("", key), _bare(n["name"])):
             if bare != key and len(bare) >= 3 and n not in out.setdefault(bare, []):
                 out[bare].append(n)
     return out
 
 
 def link_nodes(conn, records: list[dict]) -> int:
-    """Recompute file → node links from titles and aliases; stamp nodes.path with
-    the best (highest-priority) file. Returns the number of links."""
+    """Recompute file → node links; stamp nodes.path with the best file.
+    Three passes, each only for nodes the previous left unlinked:
+      1. exact — the node's name (also without a school prefix, a trailing
+         qualifier or year) equals a file's title or alias (title likewise
+         without its qualifier), best kind wins;
+      2. contains — a multi-word title/alias of an entity file sits inside the
+         node's name ("Bain ACI Application" ⊃ "Bain ACI"); the longest match
+         wins, then kind. Single words never count here: "Harvard" would claim
+         Harvard Federal Credit Union, and the owner's name every "Alvin's …";
+      3. inherited — a fact or event under an entity that has a file lives in
+         that file ("Treasurer of Aalto Triathlon Club" → the club's file).
+    Returns the number of links (all passes)."""
+    from brain import config
     names = _node_name_map(conn)
+    nodes = {n["id"]: n for n in db.all_nodes(conn)}
+    owner = _norm(config.get_user() or "")
     conn.execute("DELETE FROM vault_file_nodes")
     best: dict[str, tuple[int, str]] = {}   # node_id → (priority, path)
     count = 0
-    for rec in sorted(records, key=lambda r: (KIND_PRIORITY.get(r["kind"], 20), r["path"])):
-        cands = [("name", rec["title"])] + [("alias", a) for a in rec["aliases"]]
+
+    def link(rec, nid, how):
+        nonlocal count
+        conn.execute("INSERT OR IGNORE INTO vault_file_nodes (path, node_id, how) VALUES (?,?,?)",
+                     (rec["path"], nid, how))
+        count += 1
+        prio = KIND_PRIORITY.get(rec["kind"], 20)
+        if nid not in best or prio < best[nid][0]:
+            best[nid] = (prio, rec["path"])
+
+    ordered = sorted(records, key=lambda r: (KIND_PRIORITY.get(r["kind"], 20), r["path"]))
+    for rec in ordered:                                                   # pass 1: exact
+        cands = [("name", rec["title"]), ("name", _YEAR_TAIL.sub("", _QUALIFIER.sub("", rec["title"] or "")))]
+        cands += [("alias", a) for a in rec["aliases"]]
         seen: set[str] = set()
         for how, cand in cands:
             key = _norm(cand)
             if not key or len(key) < 3:
                 continue
             for n in names.get(key, []):
-                if n["id"] in seen:
-                    continue
-                seen.add(n["id"])
-                conn.execute("INSERT OR IGNORE INTO vault_file_nodes (path, node_id, how) VALUES (?,?,?)",
-                             (rec["path"], n["id"], how))
-                count += 1
-                prio = KIND_PRIORITY.get(rec["kind"], 20)
-                if n["id"] not in best or prio < best[n["id"]][0]:
-                    best[n["id"]] = (prio, rec["path"])
+                if n["id"] not in seen:
+                    seen.add(n["id"])
+                    link(rec, n["id"], how)
+    phrases = []                                                          # pass 2: contains
+    for rec in ordered:
+        if rec["kind"] not in CONTAIN_KINDS:
+            continue
+        for cand in [rec["title"]] + list(rec["aliases"]):
+            toks = _bare(cand).split()
+            if len(toks) >= 2 and " ".join(toks) != owner:
+                phrases.append((toks, rec))
+    for nid, n in nodes.items():
+        if nid in best or n["type"] == "category" or _norm(n["name"]) == owner:
+            continue
+        ntoks = _norm(n["name"]).split()
+        hits = []
+        for toks, rec in phrases:
+            k = len(toks)
+            if k < len(ntoks) and any(ntoks[i:i + k] == toks for i in range(len(ntoks) - k + 1)):
+                hits.append((k, -KIND_PRIORITY.get(rec["kind"], 20), rec))
+        if hits:
+            hits.sort(key=lambda h: (h[0], h[1]), reverse=True)
+            link(hits[0][2], nid, "contains")
+    parent = {}                                                           # pass 3: inherited
+    for src, tgt in conn.execute("SELECT source_id, target_id FROM edges WHERE relation = 'part_of'"):
+        if src in nodes and tgt in nodes:
+            parent.setdefault(src, tgt)
+    by_path = {rec["path"]: rec for rec in records}
+    for nid, n in nodes.items():
+        if nid in best or n["type"] == "category":
+            continue
+        cur, hops = parent.get(nid), 0
+        while cur and hops < INHERIT_HOPS:
+            p = nodes[cur]
+            if p["type"] == "category" or _norm(p["name"]) == owner:
+                break
+            if cur in best and best[cur][1] in by_path:
+                link(by_path[best[cur][1]], nid, "inherited")
+                break
+            cur, hops = parent.get(cur), hops + 1
     conn.execute("UPDATE nodes SET path = NULL")
     for nid, (_, path) in best.items():
         conn.execute("UPDATE nodes SET path = ? WHERE id = ?", (path, nid))

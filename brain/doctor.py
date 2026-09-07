@@ -129,6 +129,38 @@ def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
 
 
 BACKUP_MAX_AGE_D = 7
+COVERAGE_MIN_IMPORTANCE = 0.7   # a node this important should have a vault file behind it (D-014)
+
+
+def check_coverage(db_path: Path, user: str = "") -> Check:
+    """Files are the brain (D-014): an important node with no vault file behind
+    it is knowledge that lives only in the graph. Name the worst offenders and
+    the cure — an alias in the file that covers it, or a new file."""
+    import sqlite3
+    from brain import config
+    user = user or config.get_user()
+    if not Path(db_path).is_file():
+        return Check("coverage", "fail", f"{db_path} missing")
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(nodes)")}
+        if "path" not in cols:
+            conn.close()
+            return Check("coverage", "warn", "graph predates `brain index` — run it")
+        rows = conn.execute(
+            "SELECT name, importance FROM nodes WHERE archived = 0 AND type != 'category' AND path IS NULL "
+            "AND importance >= ? AND lower(name) != lower(?) ORDER BY importance DESC, name",
+            (COVERAGE_MIN_IMPORTANCE, user or "")).fetchall()
+        conn.close()
+    except sqlite3.Error as e:
+        return Check("coverage", "fail", f"cannot read graph: {e}")
+    if not rows:
+        return Check("coverage", "ok", f"every node at importance ≥ {COVERAGE_MIN_IMPORTANCE} has a vault file")
+    named = ", ".join(f"{r['name']} ({r['importance']:.1f})" for r in rows[:3])
+    return Check("coverage", "warn", f"{len(rows)} important node(s) with no vault file: {named} — "
+                 "add an alias to the file that covers it, or write the file, then `brain index`")
+
 
 
 def check_backups(backups_dir: Path = DATA_DIR / "backups", now: float | None = None) -> Check:
@@ -388,6 +420,7 @@ def run(root: Path, today: date | None = None, now: float | None = None,
               check_claims(db_path, now), check_key(), check_api(api_probe)]
     if backups_dir is not None:
         checks.append(check_backups(backups_dir, now))
+    checks.append(check_coverage(db_path))
     if capture_log is not None:
         checks.append(check_capture(capture_log, now))
     if brief_log is not None:
