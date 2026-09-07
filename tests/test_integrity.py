@@ -58,6 +58,8 @@ class IntegrityTests(BrainTestCase):
         # a fact used as a container: the computer filed under a residence fact
         home = db.add_node(c, "Alvin's Residence (US)", type_="fact"); db.add_edge(c, home, career, "part_of")
         pc = db.add_node(c, "Alvin's computer", type_="artifact"); db.add_edge(c, pc, home, "part_of")
+        # a cross-link to a category: structure noise a merge left behind
+        db.add_edge(c, harvard, edu, "relates_to")
         # an empty template area and a one-node area beside the broad ones: thin
         health = db.add_node(c, "Health", type_="category"); db.add_edge(c, health, me, "part_of")
         fam = db.add_node(c, "Family", type_="category"); db.add_edge(c, fam, me, "part_of")
@@ -92,6 +94,8 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r.thin_areas, [("Health", 0), ("Family", 1)])          # Education/Career are broad; Hobbies is unrooted
         self.assertIn("thin area(s): Health (0), Family (1)", r.summary())
         self.assertIn("brain move <area> <broader>", r.summary())
+        self.assertEqual(r.category_links, 1)
+        self.assertIn("1 cross-link(s) to a category (brain repair)", r.summary())
         self.assertEqual(r.fact_parents, [("Alvin's Residence (US)", ["Alvin's computer"]),
                                           ("MIT identity", ["Life Events"])])           # the mis-rooted category counts too
         self.assertIn("2 fact(s) used as a parent: Alvin's Residence (US) ← Alvin's computer, MIT identity ← Life Events (a fact is a leaf", r.summary())
@@ -105,6 +109,8 @@ class IntegrityTests(BrainTestCase):
         self.build_broken()
         fixed = integrity.repair(self.conn, "Alvin")
         self.assertEqual(fixed["dangling"], 1)         # the ghost's edge is gone
+        self.assertEqual(fixed["category_links"], 1)   # Harvard relates_to Education: gone
+        self.assertEqual(integrity.check(self.conn, "Alvin").category_links, 0)
         self.assertEqual(integrity.check(self.conn, "Alvin").dangling_edges, 0)
         self.assertEqual(fixed["orphans"], 6)          # Boston + the five parentless people/task nodes
         self.assertEqual(fixed["multi_parent"], 2)

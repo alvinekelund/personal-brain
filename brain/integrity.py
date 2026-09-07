@@ -45,6 +45,7 @@ class Report:
     flat_lists: list[tuple[str, int]] = field(default_factory=list)  # a non-category node with that many children: a list, not structure
     thin_areas: list[tuple[str, int]] = field(default_factory=list)  # top-level categories with that few descendants
     fact_parents: list[tuple[str, list[str]]] = field(default_factory=list)  # a fact with children: a leaf used as a container
+    category_links: int = 0                                       # cross-links (non-part_of) touching a category: structure noise
 
     @property
     def structural(self) -> int:
@@ -56,7 +57,7 @@ class Report:
     def clean(self) -> bool:
         return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
                 and not self.oversized and not self.flat_lists and not self.thin_areas
-                and not self.fact_parents)
+                and not self.fact_parents and not self.category_links)
 
     def summary(self) -> str:
         bits = []
@@ -68,6 +69,7 @@ class Report:
         if self.cycles: bits.append(f"{len(self.cycles)} cycle(s)")
         if self.dangling_edges: bits.append(f"{self.dangling_edges} dangling edge(s) to deleted nodes")
         if self.legacy_tasks: bits.append(f"{len(self.legacy_tasks)} legacy task node(s)")
+        if self.category_links: bits.append(f"{self.category_links} cross-link(s) to a category (brain repair)")
         if self.duplicates: bits.append(f"{len(self.duplicates)} possible duplicate pair(s)")
         if self.oversized:
             bits.append("oversized: " + ", ".join(f"{n} ({c})" for n, c in self.oversized[:4]) + " (brain subgroup)")
@@ -194,6 +196,11 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
                         r.duplicates.append(pair)
                         listed.add(frozenset(pair))
     r.semantic_duplicates.sort(key=lambda x: -x[2])
+    # a cross-link to a category is structure noise: merges used to keep the dropped
+    # node's category parent as "relates_to Education" (13 of them on Sep 6 2026)
+    r.category_links = sum(
+        1 for s_, t_, rel in conn.execute("SELECT source_id, target_id, relation FROM edges WHERE relation != 'part_of'")
+        if s_ in nodes and t_ in nodes and (nodes[s_]["type"] == "category" or nodes[t_]["type"] == "category"))
     # a fact is an attribute — a leaf by design ("also emit it as a fact node with
     # that entity as parent"); one with children is being used as a container
     # ("Alvin's computer" filed under the fact "Alvin's Residence (US)")
@@ -318,14 +325,19 @@ def repair(conn, user: str) -> dict:
     - node directly under the person: re-home under its type's fallback category;
     - orphan: attach to its type's fallback category (created and rooted if needed);
     - cycle: cut the part_of edge leaving the node with the larger subtree;
-    - dangling edge (its source or target node was deleted): removed.
+    - dangling edge (its source or target node was deleted): removed;
+    - cross-link touching a category (structure noise a merge left behind): removed.
     Never deletes or renames nodes; duplicates and embeddings are reported, not fixed."""
     out = {"multi_parent": 0, "categories": 0, "under_identity": 0, "orphans": 0, "cycles": 0,
-           "dangling": 0}
+           "dangling": 0, "category_links": 0}
     db.ensure_identity_anchor(conn, user)
     ident = db.get_node_by_name(conn, user)["id"]
     # 0. edges to nodes that no longer exist
     out["dangling"] = conn.execute(f"DELETE FROM edges {_DANGLING_WHERE}").rowcount
+    # 0b. cross-links touching a category: structure, not knowledge
+    out["category_links"] = conn.execute(
+        "DELETE FROM edges WHERE relation != 'part_of' AND (source_id IN (SELECT id FROM nodes WHERE type = 'category') "
+        "OR target_id IN (SELECT id FROM nodes WHERE type = 'category'))").rowcount
 
     def ensure_category(name: str) -> str:
         cat = db.get_node_by_name(conn, name)

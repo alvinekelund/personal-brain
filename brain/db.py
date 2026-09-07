@@ -536,7 +536,10 @@ def merge_nodes(conn, keep_id, drop_id) -> bool:
             continue
         relation = edge["relation"]
         if relation == "part_of" and src == keep_id and keep_parent and tgt != keep_parent:
-            relation = "relates_to"  # a second parent would break the tree
+            other = get_node(conn, tgt)
+            if other and other["type"] == "category":
+                continue   # a category is structure, not knowledge: "relates_to Education" says nothing
+            relation = "relates_to"  # a second parent would break the tree; a real entity stays connected
         add_edge(conn, src, tgt, relation, edge["weight"])
     for edge in old_edges:  # nothing may keep pointing at the node about to vanish
         delete_edge(conn, edge["id"])

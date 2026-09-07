@@ -1232,21 +1232,27 @@ class MergeNodesTests(BrainTestCase):
                 if e["source_id"] == nid and e["relation"] == "part_of"]
 
     def test_keeps_one_parent_and_turns_the_other_into_a_cross_link(self):
-        """Merging a duplicate that lived under a different category must not
-        give the survivor two part_of parents (the tree invariant); the old
-        parent becomes a relates_to cross-link instead."""
+        """Merging a duplicate that lived under a different parent must not
+        give the survivor two part_of parents (the tree invariant); a real
+        entity parent becomes a relates_to cross-link, a category parent is
+        simply dropped (13 'relates_to Education' edges on Sep 6 2026 said nothing)."""
         hobbies = db.add_node(self.conn, "Hobbies", type_="category")
         education = db.add_node(self.conn, "Education", type_="category")
+        mit = db.add_node(self.conn, "MIT", type_="organization")
         keep = db.add_node(self.conn, "Sundai Club", type_="organization")
         drop = db.add_node(self.conn, "Sundai", type_="organization")
+        drop2 = db.add_node(self.conn, "Sundai (MIT)", type_="organization")
         db.add_edge(self.conn, keep, hobbies, "part_of")
         db.add_edge(self.conn, drop, education, "part_of")
+        db.add_edge(self.conn, drop2, mit, "part_of")
         self.conn.commit()
         self.assertTrue(db.merge_nodes(self.conn, keep, drop))
+        self.assertTrue(db.merge_nodes(self.conn, keep, drop2))
         self.assertEqual(self._parents(keep), [hobbies])             # still exactly one parent
         cross = [(e["target_id"], e["relation"]) for e in db.edges_for_node(self.conn, keep)
                  if e["source_id"] == keep and e["relation"] != "part_of"]
-        self.assertIn((education, "relates_to"), cross)             # connection kept as a cross-link
+        self.assertNotIn((education, "relates_to"), cross)          # a category is structure: no cross-link
+        self.assertIn((mit, "relates_to"), cross)                    # a real entity stays connected
 
     def test_children_of_the_dropped_node_are_reparented(self):
         career = db.add_node(self.conn, "Career", type_="category")
