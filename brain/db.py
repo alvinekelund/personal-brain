@@ -1,4 +1,5 @@
 import json
+from array import array
 import re
 import sqlite3
 import uuid
@@ -205,6 +206,31 @@ def _migrate(conn):
     if "last_decayed" not in existing:
         conn.execute("ALTER TABLE edges ADD COLUMN last_decayed REAL NOT NULL DEFAULT 0")
     conn.execute("UPDATE edges SET last_decayed = ? WHERE last_decayed = 0", (t,))
+    _compact_embeddings(conn)
+
+
+def _compact_embeddings(conn):
+    """One-time: JSON-text embeddings become packed float32 (3.5x smaller, no
+    json.loads on every semantic pass). Runs on every connect but touches only
+    text rows, so a migrated DB costs one cheap query per table."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    converted = 0
+    for table, key in (("nodes", "id"), ("vault_files", "path"), ("ledger_embeddings", "key")):
+        if table not in tables:
+            continue
+        rows = conn.execute(f"SELECT {key}, embedding FROM {table} WHERE typeof(embedding) = 'text'").fetchall()
+        for k, text in rows:
+            vec = decode_embedding(text)
+            conn.execute(f"UPDATE {table} SET embedding = ? WHERE {key} = ?",
+                         (encode_embedding(vec) if vec else None, k))
+            converted += 1
+    if converted:
+        conn.commit()
+        try:
+            conn.execute("VACUUM")     # give the freed pages back to the filesystem
+        except sqlite3.OperationalError:
+            pass                       # inside a transaction or a locked file: the space returns later
+    return converted
 
 
 def new_id():
@@ -289,10 +315,35 @@ def touch_node(conn, node_id):
     _reinforce_ancestors(conn, node_id)
 
 
+def encode_embedding(vector) -> bytes:
+    """Pack a vector as little-endian float32 — 12 KB for a 3072-dim vector
+    against 42 KB as JSON text, which was three quarters of a 29 MB brain."""
+    return array("f", (float(x) for x in vector)).tobytes()
+
+
+def decode_embedding(value):
+    """The stored vector as a list, whatever form it is in: packed float32
+    (current), JSON text (legacy rows), or None."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        a = array("f")
+        a.frombytes(bytes(value))
+        return a.tolist()
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return None
+    return None
+
+
 def set_embedding(conn, node_id, vector):
-    """Store a node's embedding vector (JSON-encoded) for semantic search."""
+    """Store a node's embedding vector (packed float32) for semantic search."""
     conn.execute(
-        "UPDATE nodes SET embedding = ? WHERE id = ?", (json.dumps(vector), node_id)
+        "UPDATE nodes SET embedding = ? WHERE id = ?", (encode_embedding(vector), node_id)
     )
 
 

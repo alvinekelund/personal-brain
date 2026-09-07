@@ -275,7 +275,7 @@ def semantic_search(conn, query_vector: list, min_weight: float = 0.0, limit: in
         if not emb:
             continue
         try:
-            vec = json.loads(emb)
+            vec = db.decode_embedding(emb)
         except (TypeError, ValueError):
             continue
         scored.append((cosine(query_vector, vec), r))

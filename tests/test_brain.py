@@ -1349,6 +1349,34 @@ class RetypeNodeTests(BrainTestCase):
         self.assertEqual((n["type"], n["half_life_days"]), ("skill", db.HALF_LIVES["skill"]))
 
 
+class EmbeddingStorageTests(BrainTestCase):
+    def test_vectors_are_packed_float32_and_legacy_json_still_reads(self):
+        """29 MB of brain.db on Sep 6 2026 was 22.7 MB of embeddings stored as
+        JSON text (42 KB per 3072-dim vector). Vectors are now packed float32
+        (12 KB); legacy JSON rows still decode and are converted on connect."""
+        import json as _json
+        nid = db.add_node(self.conn, "Padel", type_="concept")
+        db.set_embedding(self.conn, nid, [0.1, -0.2, 0.3])
+        self.conn.commit()
+        raw = self.conn.execute("SELECT embedding FROM nodes WHERE id = ?", (nid,)).fetchone()[0]
+        self.assertIsInstance(raw, bytes)
+        self.assertEqual(len(raw), 3 * 4)
+        self.assertEqual([round(x, 6) for x in db.decode_embedding(raw)], [0.1, -0.2, 0.3])
+        legacy = db.add_node(self.conn, "Old row", type_="concept")
+        self.conn.execute("UPDATE nodes SET embedding = ? WHERE id = ?", (_json.dumps([1.0, 2.0]), legacy))
+        self.conn.commit()
+        self.assertEqual(db.decode_embedding(self.conn.execute("SELECT embedding FROM nodes WHERE id = ?", (legacy,)).fetchone()[0]), [1.0, 2.0])
+        self.assertEqual(db._compact_embeddings(self.conn), 1)                 # the legacy row is converted…
+        self.assertEqual(db._compact_embeddings(self.conn), 0)                 # …once
+        raw2 = self.conn.execute("SELECT embedding FROM nodes WHERE id = ?", (legacy,)).fetchone()[0]
+        self.assertIsInstance(raw2, bytes)
+        self.assertEqual(db.decode_embedding(raw2), [1.0, 2.0])
+        self.assertIsNone(db.decode_embedding(None))
+        self.assertIsNone(db.decode_embedding("not json"))
+        hits = graph.semantic_search(self.conn, [0.1, -0.2, 0.3], limit=1)     # the search path reads packed rows
+        self.assertEqual(hits[0][1]["name"], "Padel")
+
+
 class ImportanceTests(BrainTestCase):
     def test_set_importance_bounds_and_effect(self):
         nid = db.add_node(self.conn, "Alvin's Apartment", type_="fact", content="Really nice.", importance=0.9)
@@ -1881,7 +1909,7 @@ class SemanticSearchTests(BrainTestCase):
         db.set_embedding(self.conn, nid, [0.1, 0.2, 0.3])
         self.conn.commit()
         import json as _json
-        self.assertEqual(_json.loads(db.get_node(self.conn, nid)["embedding"]), [0.1, 0.2, 0.3])
+        self.assertEqual([round(x, 6) for x in db.decode_embedding(db.get_node(self.conn, nid)["embedding"])], [0.1, 0.2, 0.3])
 
     def test_semantic_search_ranks_by_similarity(self):
         near = db.add_node(self.conn, "neural networks", type_="concept")
@@ -2005,7 +2033,7 @@ class PortabilityTests(BrainTestCase):
         self.conn.commit()
         full = portability.export_brain(self.conn)
         node = next(x for x in full["nodes"] if x["name"] == "Anna Houstecka")
-        self.assertEqual(json.loads(node["embedding"]), [0.5, 0.25])
+        self.assertEqual(db.decode_embedding(node["embedding"]), [0.5, 0.25])
         self.assertNotIn("path", node)                                      # recomputed by brain index
         lean = portability.export_brain(self.conn, lean=True)
         self.assertNotIn("embedding", next(x for x in lean["nodes"] if x["name"] == "Anna Houstecka"))
@@ -2018,7 +2046,7 @@ class PortabilityTests(BrainTestCase):
         r = db.get_node(dest, a)
         self.assertEqual(r["importance"], 1.0)
         self.assertEqual(r["last_decayed"], 123456.0)
-        self.assertEqual(json.loads(r["embedding"]), [0.5, 0.25])
+        self.assertEqual(db.decode_embedding(r["embedding"]), [0.5, 0.25])
         self.assertEqual(dest.execute("SELECT COUNT(*) FROM ingestion_log").fetchone()[0], 1)  # audit trail restored
         portability.import_brain(dest, full)                                                    # idempotent
         self.assertEqual(dest.execute("SELECT COUNT(*) FROM ingestion_log").fetchone()[0], 1)

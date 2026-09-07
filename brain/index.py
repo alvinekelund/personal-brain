@@ -296,7 +296,7 @@ def build(conn, root: Path, embed: bool = True) -> dict:
             except Exception:
                 continue
             conn.execute("UPDATE vault_files SET embedding = ? WHERE path = ?",
-                         (json.dumps(vec), rec["path"]))
+                         (db.encode_embedding(vec), rec["path"]))
             stats["embedded"] += 1
         conn.commit()
     stats["ledger_embedded"] = embed_ledgers(conn, root, embed=embed)
@@ -399,7 +399,7 @@ def embed_ledgers(conn, root: Path, embed: bool = True) -> int:
         with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
             for key, vec in ex.map(fetch, todo):
                 if vec:
-                    conn.execute("UPDATE ledger_embeddings SET embedding = ? WHERE key = ?", (json.dumps(vec), key))
+                    conn.execute("UPDATE ledger_embeddings SET embedding = ? WHERE key = ?", (db.encode_embedding(vec), key))
                     done += 1
         conn.commit()
     return done
@@ -411,7 +411,7 @@ def ledger_semantic(conn, query_vector, limit: int = 6, min_cos: float = SEMANTI
     scored = []
     for r in conn.execute("SELECT key, embedding FROM ledger_embeddings WHERE embedding IS NOT NULL"):
         try:
-            cos = _cosine(query_vector, json.loads(r["embedding"]))
+            cos = _cosine(query_vector, db.decode_embedding(r["embedding"]))
         except (TypeError, ValueError):
             continue
         if cos >= min_cos:
@@ -482,7 +482,7 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
             why.append("node: " + ", ".join(seeded[r["path"]][:2]))
         if query_vector is not None and r["embedding"]:
             try:
-                cos = _cosine(query_vector, json.loads(r["embedding"]))
+                cos = _cosine(query_vector, db.decode_embedding(r["embedding"]))
             except (TypeError, ValueError):
                 cos = 0.0
             if cos >= SEMANTIC_MIN and (score > 0 or cos >= SEMANTIC_ONLY_MIN):

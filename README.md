@@ -248,7 +248,7 @@ Honest ceilings, measured against the design rather than benchmarks:
 
 | Nodes | What happens |
 |---|---|
-| **up to ~10k** | Everything as is. SQLite + WAL, JSON-text embeddings scanned in Python, vis-network for the graph, one Gemini call per stage. |
+| **up to ~10k** | Everything as is. SQLite + WAL, packed float32 embeddings (12 KB per 3072-dim vector; JSON text was 42 KB) scanned in Python, vis-network for the graph, one Gemini call per stage. |
 | **~10k–100k** | Semantic search and dedup scan every embedding (`json.loads` + cosine per node) and the web view ships every node: store embeddings as float32 BLOBs behind an HNSW index, add an FTS5 table for keyword search, render the viewport around the focused node instead of the whole graph. |
 | **beyond** | A different product: Postgres + pgvector, batched embedding calls, an async ingest queue, `reorganize` per subtree instead of one catalogue prompt. |
 

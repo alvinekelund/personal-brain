@@ -512,7 +512,7 @@ def _embed_and_find_dupe(conn, db, name, content, type_):
         if r["type"] != type_ or not emb:
             continue
         try:
-            sim = _cosine(vec, json.loads(emb))
+            sim = _cosine(vec, db.decode_embedding(emb))
         except (TypeError, ValueError):
             continue
         if sim > best:
@@ -594,7 +594,7 @@ def merge_into_db(conn, extracted: dict, source: str, raw_text: str,
         if not emb:
             continue
         try:
-            existing_embs_by_type.setdefault(r["type"], []).append((r["id"], json.loads(emb)))
+            existing_embs_by_type.setdefault(r["type"], []).append((r["id"], db.decode_embedding(emb)))
         except (TypeError, ValueError):
             pass
 

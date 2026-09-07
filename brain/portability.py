@@ -21,6 +21,8 @@ def export_brain(conn, lean: bool = False) -> dict:
         d.pop("path", None)  # recomputed by `brain index`
         if lean:
             d.pop("embedding", None)
+        else:
+            d["embedding"] = db.decode_embedding(d.get("embedding"))   # packed in the DB, a plain list in the file
         nodes.append(d)
     edges = [dict(r) for r in conn.execute("SELECT * FROM edges").fetchall()]
     # the ingestion log is the audit trail (and what `brain doctor` reads for
@@ -68,7 +70,8 @@ def import_brain(conn, data: dict) -> tuple:
              int(n.get("archived", 0)),
              float(n.get("importance", 0.5)),          # was dropped: every restored node became 0.5
              float(n.get("last_decayed", last_accessed)),
-             emb if isinstance(emb, str) else (json.dumps(emb) if emb else None)),
+             db.encode_embedding(emb) if isinstance(emb, list) and emb
+             else (db.encode_embedding(db.decode_embedding(emb)) if isinstance(emb, str) and db.decode_embedding(emb) else None)),
         )
         existing_ids.add(nid)
         existing_names.add(key)

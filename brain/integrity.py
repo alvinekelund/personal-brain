@@ -168,11 +168,10 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
     for nid, n in nodes.items():
         if n["type"] == "category" or not n["embedding"]:
             continue
-        try:
-            vec = json.loads(n["embedding"])
-            norm = math.sqrt(sum(x * x for x in vec))
-        except (TypeError, ValueError):
+        vec = db.decode_embedding(n["embedding"])
+        if not vec:
             continue
+        norm = math.sqrt(sum(x * x for x in vec))
         if norm:
             unit[nid] = [x / norm for x in vec]
     by_type: dict[str, list[str]] = {}
