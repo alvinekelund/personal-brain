@@ -10,6 +10,7 @@ degrade retrieval); `repair` fixes the structural ones deterministically.
 from __future__ import annotations
 
 import difflib
+from datetime import date
 import re
 from dataclasses import dataclass, field
 
@@ -371,6 +372,28 @@ STALE_CLAIM_DAYS = 30
 _PLAN_TENSE = re.compile(r"\b(plans? to|planning to|is currently|currently|intends? to|wants? to|"
                          r"is trying to|is considering|will be|upcoming|soon)\b", re.I)
 _DATED = re.compile(r"\bas of\b", re.I)
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july",
+                                       "august", "september", "october", "november", "december"), 1)}
+_MONTHS.update({m[:3]: i for m, i in list(_MONTHS.items())})
+_MONTHS["sept"] = 9
+_FUTURE_DATED = re.compile(r"\b(?:will|is going to|is scheduled to|is expected to)\b[^.;]{0,80}?\bon "
+                           r"([A-Za-z]{3,9})\.? (\d{1,2})(?:st|nd|rd|th)?(?:,? (\d{4}))?", re.I)
+
+
+def _passed_date(content: str, today) -> str | None:
+    """'will begin classes on September 2' once September 2 has gone by — the
+    phrase that dates a future claim, or None. A missing year is this year."""
+    m = _FUTURE_DATED.search(content)
+    if not m:
+        return None
+    month = _MONTHS.get(m.group(1).lower())
+    if not month:
+        return None
+    try:
+        when = date(int(m.group(3) or today.year), month, int(m.group(2)))
+    except ValueError:
+        return None
+    return f"{m.group(0).strip()} (passed)" if when < today else None
 
 
 def stale_claims(conn, days: int = STALE_CLAIM_DAYS, now: float | None = None) -> list[tuple[str, str, int]]:
@@ -383,12 +406,17 @@ def stale_claims(conn, days: int = STALE_CLAIM_DAYS, now: float | None = None) -
     is deliberate and skipped — date a long-running plan and it stops nagging."""
     import time
     now = now or time.time()
+    today = date.fromtimestamp(now)
     out = []
     for n in db.all_nodes(conn):
         if n["type"] == "category":
             continue
         content = n["content"] or ""
         age = int((now - n["created_at"]) // 86400)
+        passed = _passed_date(content, today)       # a dated future claim is stale the day after, whatever its age
+        if passed:
+            out.append((n["name"], passed, age))
+            continue
         if age < days or _DATED.search(content):
             continue
         m = _PLAN_TENSE.search(content)

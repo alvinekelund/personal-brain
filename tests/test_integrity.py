@@ -195,6 +195,31 @@ class IntegrityTests(BrainTestCase):
         c.commit()
         self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=now)], ["Harvard"])  # a restatement clears it
 
+    def test_dated_future_claims_go_stale_the_day_after(self):
+        """'Alvin will begin his classes on September 2' was six days old and
+        past on Sep 6 2026 — too young for the 30-day rule, wrong all the same.
+        A future claim that names its date is stale once the date has gone by."""
+        import time
+        from datetime import datetime
+        c = self.conn
+        db.ensure_identity_anchor(c, "Alvin")
+        start = db.add_node(c, "SM Data Science Start", type_="event",
+                            content="Alvin will begin his Harvard SM in Data Science classes on September 2.")
+        later = db.add_node(c, "HackMIT", type_="event", content="Alvin will be on the floor on Sept 19th, 2026.")
+        next_year = db.add_node(c, "Graduation", type_="event", content="Alvin is expected to graduate on December 15, 2027.")
+        no_date = db.add_node(c, "Padel", type_="event", content="Alvin will play padel on Tuesdays.")
+        c.commit()
+        sep6 = datetime(2026, 9, 6, 12).timestamp()
+        rows = integrity.stale_claims(c, now=sep6)
+        self.assertEqual([(n, p) for n, p, _ in rows], [("SM Data Science Start", "will begin his Harvard SM in Data Science classes on September 2 (passed)")])
+        aug30 = datetime(2026, 8, 30, 12).timestamp()
+        self.assertEqual(integrity.stale_claims(c, now=aug30), [])
+        sep20 = datetime(2026, 9, 20, 12).timestamp()
+        self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=sep20)], ["HackMIT", "SM Data Science Start"])
+        db.set_content(c, start, "Alvin's classes began on September 2, 2026.")
+        c.commit()
+        self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=sep20)], ["HackMIT"])
+
     def test_norm_ignores_possessives(self):
         self.assertEqual(integrity._norm("Alvin's Girlfriend"), "girlfriend")
         self.assertEqual(integrity._norm("The MIT-identity!"), "mit identity")
