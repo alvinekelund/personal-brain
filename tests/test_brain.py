@@ -1006,6 +1006,26 @@ class CitedSourcesTests(BrainTestCase):
         self.assertEqual(graph.sources_line({"cited": [], "sources": []}), "")
 
 
+class RedactionTests(BrainTestCase):
+    def test_ingest_masks_credentials_before_the_model_and_the_log(self):
+        """A pasted 'export GEMINI_API_KEY=…' reached the extractor and the
+        ingestion log verbatim; the only guard was the prompt's 'never keep
+        secrets'. Every ingest path now masks it first."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        seen = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (seen.setdefault("p", p), "{}")[1]
+        try:
+            extract.ingest(self.conn, "My key: export GEMINI_API_KEY=AIzaSyD-1234567890abcdefghijklmnop for the brain.",
+                           user="Alvin", inbox_root=False)
+        finally:
+            llm.generate = orig
+        self.assertNotIn("AIzaSyD", seen["p"])
+        self.assertIn("[redacted]", seen["p"])
+        logged = self.conn.execute("SELECT raw_text FROM ingestion_log ORDER BY ingested_at DESC LIMIT 1").fetchone()
+        self.assertTrue(logged is None or "AIzaSyD" not in logged[0])
+
+
 class RevivalTests(BrainTestCase):
     def test_ingest_revives_a_forgotten_parent_and_match(self):
         """`brain forget Poker` at 21:00; at 23:00 another session ingested a

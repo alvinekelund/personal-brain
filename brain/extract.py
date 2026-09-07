@@ -362,6 +362,19 @@ def _neighbour_parent(conn, db, node, identity_id: str):
     return None
 
 
+_SECRET_ASSIGN = re.compile(r"((?:api[_-]?key|token|secret|password|passwd|authorization|bearer)\s*[:=]\s*)(\S{6,})", re.I)
+_LONG_TOKEN = re.compile(r"\b(?=[A-Za-z0-9_\-]{32,}\b)(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]{32,}\b")
+
+
+def redact(text: str) -> str:
+    """Mask what looks like a credential — 'GEMINI_API_KEY=AIza…', 'token: eyJ…',
+    bare 32+ character tokens with digits — before text is sent to the model or
+    stored. Applied at every ingest (add, MCP, web, capture); the prompt rule
+    'never keep secrets' was the only guard before."""
+    text = _SECRET_ASSIGN.sub(lambda m: m.group(1) + "[redacted]", text or "")
+    return _LONG_TOKEN.sub("[redacted]", text)
+
+
 def _by_name(conn, name):
     """An existing node by name — revived if it had been forgotten: the text
     names it again, and a parent or a match that stays archived leaves the new
@@ -941,6 +954,7 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
     the configured vault. `deadline_s` (default BRAIN_INGEST_DEADLINE /
     INGEST_DEADLINE) is the wall-clock point after which the best-effort stages
     are skipped rather than started."""
+    raw = redact(raw)
     from brain import db, vault
 
     t0 = time.monotonic()

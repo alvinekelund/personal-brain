@@ -126,17 +126,7 @@ def _ts(entry: dict) -> float | None:
         return None
 
 
-_SECRET_ASSIGN = re.compile(r"((?:api[_-]?key|token|secret|password|passwd|authorization|bearer)\s*[:=]\s*)(\S{6,})", re.I)
-_LONG_TOKEN = re.compile(r"\b(?=[A-Za-z0-9_\-]{32,}\b)(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]{32,}\b")
-
-
-def redact(text: str) -> str:
-    """Mask what looks like a credential before the text leaves the machine:
-    'GEMINI_API_KEY=AIza…' and 'token: eyJ…' assignments, and bare 32+ character
-    tokens with digits in them. The distiller is told never to keep secrets;
-    this keeps them out of the request as well."""
-    text = _SECRET_ASSIGN.sub(lambda m: m.group(1) + "[redacted]", text or "")
-    return _LONG_TOKEN.sub("[redacted]", text)
+from brain.extract import redact  # one masking rule for every ingest path
 
 
 def is_automation(text: str) -> bool:
