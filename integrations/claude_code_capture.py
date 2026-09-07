@@ -22,6 +22,7 @@ Design constraints:
 Stdin: hook JSON ({"transcript_path": ..., "session_id": ...}).
 """
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -123,6 +124,19 @@ def _ts(entry: dict) -> float | None:
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
     except ValueError:
         return None
+
+
+_SECRET_ASSIGN = re.compile(r"((?:api[_-]?key|token|secret|password|passwd|authorization|bearer)\s*[:=]\s*)(\S{6,})", re.I)
+_LONG_TOKEN = re.compile(r"\b(?=[A-Za-z0-9_\-]{32,}\b)(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]{32,}\b")
+
+
+def redact(text: str) -> str:
+    """Mask what looks like a credential before the text leaves the machine:
+    'GEMINI_API_KEY=AIza…' and 'token: eyJ…' assignments, and bare 32+ character
+    tokens with digits in them. The distiller is told never to keep secrets;
+    this keeps them out of the request as well."""
+    text = _SECRET_ASSIGN.sub(lambda m: m.group(1) + "[redacted]", text or "")
+    return _LONG_TOKEN.sub("[redacted]", text)
 
 
 def is_automation(text: str) -> bool:
@@ -268,7 +282,7 @@ def _capture():
     # and the watermark then marked all of it as mined
     parts = []
     for start in range(0, len(new), MAX_USER_CHARS):
-        out = llm.generate(DISTILL_PROMPT.format(user=user, messages=new[start:start + MAX_USER_CHARS])).strip()
+        out = llm.generate(DISTILL_PROMPT.format(user=user, messages=redact(new[start:start + MAX_USER_CHARS]))).strip()
         if out and not out.upper().startswith("NONE"):
             parts.append(out)
     facts = " ".join(parts).strip()

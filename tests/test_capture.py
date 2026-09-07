@@ -97,6 +97,18 @@ class TranscriptParsingTests(CaptureTestCase):
         self.assertTrue(capture.is_automation("This is an automated run of a scheduled task. Do the thing."))
         self.assertFalse(capture.is_automation("I moved to Boston last week and want to remember my new address."))
 
+    def test_credentials_are_masked_before_the_text_leaves(self):
+        """The distiller is told never to keep secrets, but the raw text still
+        went to the model. Assignments and long bare tokens are masked first."""
+        r = capture.redact("export GEMINI_API_KEY=AIzaSyD-1234567890abcdefghijklmnop and token: eyJhbGciOiJIUzI1NiJ9.abc "
+                           "then Bearer  Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8 and a plain sentence about Conant Hall 112.")
+        self.assertNotIn("AIzaSyD", r)
+        self.assertNotIn("eyJhbGci", r)
+        self.assertNotIn("Q1w2E3r4", r)
+        self.assertIn("GEMINI_API_KEY=[redacted]", r)
+        self.assertIn("Conant Hall 112", r)                                          # ordinary text survives
+        self.assertEqual(capture.redact("Anna Houstecka moved to Prague in 2025."), "Anna Houstecka moved to Prague in 2025.")
+
     def test_compaction_summary_is_not_the_persons_words(self):
         """A long session's transcript carries 'This session is being continued
         from a previous conversation…' as a user entry: the assistant's own
