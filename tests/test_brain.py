@@ -1102,6 +1102,22 @@ class SearchTests(BrainTestCase):
         self.assertEqual(db.search_nodes(self.conn, "the of and"), [])
 
 
+class SearchRankingTests(BrainTestCase):
+    def test_the_thing_itself_outranks_things_that_mention_it(self):
+        """`brain query 9.522` ranked MIT and 6.C57 (whose contents cite 9.522)
+        above the node named MIT 9.522 on Sep 6 2026: name hits were worth no
+        more than content hits and every weight was 1.0."""
+        db.add_node(self.conn, "MIT", type_="organization", content="Petitions approved for 6.4212 and 9.522.")
+        db.add_node(self.conn, "MIT 6.C57", type_="concept", content="A fallback behind the approved 6.4212 and 9.522.")
+        db.add_node(self.conn, "MIT 9.522", type_="concept", content="Statistical Reinforcement Learning (Rakhlin).")
+        db.add_node(self.conn, "Padel", type_="event", content="A racket sport.")
+        self.conn.commit()
+        names = [r["name"] for r in db.search_nodes(self.conn, "9.522")]
+        self.assertEqual(names[0], "MIT 9.522")
+        self.assertEqual(set(names), {"MIT 9.522", "MIT", "MIT 6.C57"})
+        self.assertEqual([r["name"] for r in db.search_nodes(self.conn, "mit 9.522")][0], "MIT 9.522")   # exact name first
+
+
 class MergeTests(BrainTestCase):
     def _extracted(self):
         return {

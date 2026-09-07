@@ -435,17 +435,23 @@ def search_nodes(conn, query, min_weight=0.0):
 
     scored = []
     for r in rows:
-        hay = f"{r['name']} {r['content'] or ''}".lower()
+        name = (r["name"] or "").lower()
+        hay = f"{name} {(r['content'] or '').lower()}"
         hay_tokens = set(_TOKEN_RE.findall(hay))
         hits = sum(1 for t in tokens if any(_stem_eq(t, h) for h in hay_tokens))
         if not hits:
             continue
         if q in hay:  # exact-phrase match is a strong signal
             hits += len(tokens)
-        scored.append((hits, r["weight"], r))
+        # the thing itself beats things that mention it: "9.522" must rank the
+        # node named "MIT 9.522" above MIT and 6.C57, whose contents cite it
+        name_tokens = set(_TOKEN_RE.findall(name))
+        name_hits = sum(1 for t in tokens if any(_stem_eq(t, h) for h in name_tokens))
+        exact = 1 if " ".join(_TOKEN_RE.findall(name)) == " ".join(sorted(tokens)) or q == name else 0
+        scored.append((hits, exact, name_hits, r["weight"], r))
 
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    return [r for _, _, r in scored]
+    scored.sort(key=lambda x: (x[0], x[1], x[2], x[3]), reverse=True)
+    return [r for *_, r in scored]
 
 
 # ── Edges ──────────────────────────────────────────────────────────────────
