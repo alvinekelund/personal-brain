@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from brain import DATA_DIR, config, db, extract, llm
 
-MIN_USER_CHARS = 200       # below this the new turns can't contain much worth keeping
+MIN_USER_CHARS = 80        # one declarative sentence is ~100 chars; below this it is "ok thanks"
 MAX_USER_CHARS = 15000     # cap what we send to the distiller
 PER_MESSAGE_CAP = 2000
 LOG_PATH = DATA_DIR / "capture.log"

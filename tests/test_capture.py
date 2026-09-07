@@ -243,6 +243,16 @@ class WatermarkTests(CaptureTestCase):
         self.assertIn("NEW TURN", calls[1])
         self.assertNotIn("OLD TURN", calls[1])
 
+    def test_one_sentence_session_is_still_distilled(self):
+        """'Anna and I move into Conant Hall 112 on September 1.' is 52 characters
+        short of the old 200-character floor: a session that ended there was
+        skipped at every capture and the fact was never kept."""
+        llm.have_key = lambda: True
+        calls = self.fake_llm()
+        t = transcript(self._tmp, [user_msg("Anna and I move into Conant Hall 112 on September 1, right next to the Science Center.")])
+        self.run_hook(t)
+        self.assertGreaterEqual(len(calls), 1)                                   # the distiller was asked
+
     def test_long_sessions_are_distilled_in_windows_not_cut_to_the_tail(self):
         """A session with more than MAX_USER_CHARS of new text used to send only
         its last 15k characters to the distiller and then mark all of it as
