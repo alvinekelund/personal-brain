@@ -845,6 +845,8 @@ class IngestTests(BrainTestCase):
         flat = " ".join(extract.SYSTEM.split())
         self.assertIn("is ONE `fact` node naming them all", flat)              # sponsors/vendors: one fact, not one node per name
         self.assertIn("never one node per name", flat)
+        self.assertIn("never one node per feature", flat)                   # a dashboard's six widgets became six nodes on Sep 4
+        self.assertIn("intends to remove Y from the CV", flat)
         self.assertNotIn("task", extract.FALLBACK_CATEGORY)
 
 

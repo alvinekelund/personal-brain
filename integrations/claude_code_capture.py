@@ -65,6 +65,11 @@ Triathlon Club"), not as a separate event.
 - A list of third parties mentioned in passing (sponsors, vendors, attendees, speakers) \
 is one fact naming them ("HackMIT 2026's sponsors are X, Y and Z"), never one fact per \
 name; only a party the user is tied to (applied, works there, knows someone) gets its own.
+- A request to edit a site, CV, document or app is an instruction, not a fact: keep only \
+what it reveals about the thing itself ("Walkthrough is a featured project on alvinekelund.com", \
+"Snaplist is a past project"), never the edit ("wants X highlighted", "intends to remove Y"). \
+Describe a wanted thing once, as one fact ("Alvin wants a dashboard that summarises schedule, \
+to-dos and reminders"), not feature by feature.
 - The messages are in order. If a later message changes or supersedes an earlier plan, \
 keep ONLY the later state; never record a plan the user has since moved past.
 - If the messages are instructions to an automation (a scheduled task prompt, a workflow), \

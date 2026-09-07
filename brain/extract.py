@@ -137,6 +137,11 @@ Rules:
   Cursor, Ramp, ...") with the thing they belong to as parent — never one node
   per name. A party gets its own node only when the text ties it to the person
   (they applied there, work there, know someone there).
+- the parts, features or requirements of one thing (a dashboard's widgets, a
+  document's sections, a plan's steps) are that thing's content — never one node
+  per feature. A wish or instruction about a thing ("wants X highlighted on the
+  site", "intends to remove Y from the CV") is not a node either: keep the thing
+  (Walkthrough, Snaplist) and put its durable state in its content.
 
 Hierarchy — organise everything into a tree rooted at the person:
 - give every node a "parent": the broader node it belongs under.

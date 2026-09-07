@@ -82,7 +82,8 @@ class DistillPromptTests(unittest.TestCase):
         for phrase in ("Name people, organisations, courses and projects specifically",
                        "a new project", "cannot be named is not worth keeping",
                        "new attribute of something already known", "NEVER include secrets",
-                       "never one fact per name"):                    # 17 HackMIT sponsors became 17 org nodes on Sep 2
+                       "never one fact per name",                     # 17 HackMIT sponsors became 17 org nodes on Sep 2
+                       "is an instruction, not a fact", "not feature by feature"):   # site-edit wishes became project nodes on Sep 4
             self.assertIn(phrase, " ".join(p.split()))
         self.assertIn("{user}", p)
         self.assertIn("{messages}", p)
