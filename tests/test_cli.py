@@ -175,6 +175,25 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 1)
         self.assertIn("No link", r.output)
 
+    def test_add_shows_where_each_node_was_filed(self):
+        """Six dashboard widgets filed under one project on Sep 4 2026 only
+        surfaced in a survey two days later: the add output named the nodes but
+        not their parents."""
+        import json
+        import brain.llm as llm
+        orig = (llm.have_key, llm.generate, llm.embed)
+        responses = iter([json.dumps({"nodes": [{"name": "Padel Tuesdays", "type": "event", "content": "Weekly game.",
+                                                 "parent": "Hobbies", "importance": 0.3}], "edges": []}), "{}"])
+        llm.have_key = lambda: True
+        llm.generate = lambda *a, **k: next(responses, "{}")
+        llm.embed = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))
+        try:
+            r = self.run_cli("add", "Alvin plays padel on Tuesdays.")
+        finally:
+            llm.have_key, llm.generate, llm.embed = orig
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("[event] Padel Tuesdays → under Hobbies", r.output)
+
     def test_today_snapshots_when_the_newest_backup_is_stale(self):
         import os, tempfile, time
         import brain.doctor as doctor

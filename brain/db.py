@@ -479,6 +479,14 @@ def add_edge(conn, source_id, target_id, relation="relates_to", weight=1.0):
     return edge_id
 
 
+def parent_of(conn, node_id):
+    """The node this one is filed under (its part_of target), or None."""
+    row = conn.execute(
+        "SELECT n.* FROM edges e JOIN nodes n ON n.id = e.target_id "
+        "WHERE e.source_id = ? AND e.relation = 'part_of' LIMIT 1", (node_id,)).fetchone()
+    return row
+
+
 def edges_for_node(conn, node_id):
     return conn.execute(
         "SELECT * FROM edges WHERE source_id = ? OR target_id = ?",

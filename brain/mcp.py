@@ -154,7 +154,8 @@ def _remember(conn, args):
     for nid in node_ids:
         n = db.get_node(conn, nid)
         if n:
-            names.append(f"[{n['type']}] {n['name']}")
+            parent = db.parent_of(conn, nid)
+            names.append(f"[{n['type']}] {n['name']}" + (f" → under {parent['name']}" if parent else ""))
     summary = f"Remembered: {len(node_ids)} node(s), {len(edge_ids)} edge(s)."
     if names:
         summary += "\n" + "\n".join(f"  {x}" for x in names[:10])

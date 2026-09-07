@@ -183,6 +183,7 @@ class ToolCallTests(MCPTestCase):
                                               "source": "test"})
         self.assertFalse(result["isError"])
         self.assertIn("Rust", tool_text(result))
+        self.assertIn("→ under", tool_text(result))                     # where it was filed
         conn = db.connect()
         node = db.get_node_by_name(conn, "Rust")
         self.assertIsNotNone(node)

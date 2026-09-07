@@ -102,12 +102,15 @@ def add(text, file_path, url, source):
         click.echo(f"{routed} action item(s) routed to LOOPS-INBOX.md (not the graph) — triage with `brain loop inbox`")
 
     click.echo(f"Added {len(node_ids)} node(s), {len(edge_ids)} edge(s).")
-    for nid in node_ids[:6]:
+    # where each one landed: six dashboard widgets filed under one project, or a
+    # sponsor under an event, is visible here instead of in next week's review
+    for nid in node_ids[:12]:
         n = db.get_node(conn, nid)
         if n:
-            click.echo(f"  [{n['type']}] {n['name']}")
-    if len(node_ids) > 6:
-        click.echo(f"  ... and {len(node_ids) - 6} more")
+            parent = db.parent_of(conn, nid)
+            click.echo(f"  [{n['type']}] {n['name']}" + (f" → under {parent['name']}" if parent else ""))
+    if len(node_ids) > 12:
+        click.echo(f"  ... and {len(node_ids) - 12} more (`brain tree` shows them all)")
 
 
 # ── show ──────────────────────────────────────────────────────────────────────
