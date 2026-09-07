@@ -885,6 +885,10 @@ class ServerApiTests(BrainTestCase):
         self.assertIn("fading", out)
         self.assertGreaterEqual(out["stats"]["total"], 1)
 
+    def test_web_page_renders_the_node_path(self):
+        from brain import server
+        self.assertIn("x.path?'  → '+esc(x.path)", server.HTML if hasattr(server, "HTML") else server.INDEX_HTML if hasattr(server, "INDEX_HTML") else open(server.__file__).read())
+
     def test_api_query_keyword(self):
         from brain import server
         db.add_node(self.conn, "transformer architectures", type_="concept", content="nets")

@@ -175,7 +175,7 @@ async function bAdd(){const i=$('addin'),t=i.value.trim();if(!t)return;msg('thin
   msg(j.error?('error: '+j.error):('+ '+(j.nodes||0)+' nodes'));if(!j.error){i.value='';setTimeout(refresh,500);}}catch(e){msg('error');}}
 async function bQuery(){const q=$('qin').value.trim();if(!q)return;const sem=$('qsem').checked?1:0;
  const r=await (await fetch('/query?q='+encodeURIComponent(q)+'&semantic='+sem)).json();
- show('Search: '+esc(q), r.map(x=>'• ['+x.type+'] '+esc(x.name)+(x.score!=null?'  ('+x.score+')':'')+'\\n   '+esc(x.content)).join('\\n')||'(no results)');}
+ show('Search: '+esc(q), r.map(x=>'• ['+x.type+'] '+esc(x.name)+(x.score!=null?'  ('+x.score+')':'')+(x.path?'  → '+esc(x.path):'')+'\\n   '+esc(x.content)).join('\\n')||'(no results)');}
 async function bContext(){const t=$('cin').value.trim();if(!t)return;show('Context: '+esc(t),'synthesising…');
  const j=await (await fetch('/context?topic='+encodeURIComponent(t))).json();show('Context: '+esc(t), esc(j.doc));}
 let chat=[];
