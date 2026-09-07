@@ -478,6 +478,16 @@ def orient_edge(conn, source_id, target_id, relation):
 def add_edge(conn, source_id, target_id, relation="relates_to", weight=1.0):
     relation = normalize_relation(relation)  # keep the graph on the controlled vocab
     source_id, target_id = orient_edge(conn, source_id, target_id, relation)
+    if relation == "relates_to":
+        # a part_of between the two already says they are related: a relates_to beside
+        # it is noise (16 such pairs on Sep 6 2026) — reinforce the spine instead
+        spine = conn.execute(
+            "SELECT id FROM edges WHERE relation = 'part_of' AND ((source_id=? AND target_id=?) OR (source_id=? AND target_id=?))",
+            (source_id, target_id, target_id, source_id)).fetchone()
+        if spine:
+            conn.execute("UPDATE edges SET last_reinforced = ?, reinforcement_count = reinforcement_count + 1 WHERE id = ?",
+                         (now(), spine["id"]))
+            return spine["id"]
     existing = conn.execute(
         "SELECT id FROM edges WHERE source_id=? AND target_id=? AND relation=?",
         (source_id, target_id, relation),

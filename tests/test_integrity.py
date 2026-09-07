@@ -58,8 +58,12 @@ class IntegrityTests(BrainTestCase):
         # a fact used as a container: the computer filed under a residence fact
         home = db.add_node(c, "Alvin's Residence (US)", type_="fact"); db.add_edge(c, home, career, "part_of")
         pc = db.add_node(c, "Alvin's computer", type_="artifact"); db.add_edge(c, pc, home, "part_of")
-        # a cross-link to a category: structure noise a merge left behind
-        db.add_edge(c, harvard, edu, "relates_to")
+        # a cross-link to a category: structure noise a merge left behind (a relates_to
+        # beside the part_of would be refused by add_edge; a typed one gets through)
+        db.add_edge(c, harvard, edu, "used_in")
+        # a relates_to doubling a part_of, inserted raw (add_edge would refuse it)
+        c.execute("INSERT INTO edges (id, source_id, target_id, relation, weight, created_at, last_reinforced) VALUES "
+                  "('rd1', ?, ?, 'relates_to', 1.0, 0, 0)", (prog, harvard))       # DS Program is part_of Harvard already
         # a passive relation written backwards, inserted raw (add_edge would turn it round)
         c.execute("INSERT INTO edges (id, source_id, target_id, relation, weight, created_at, last_reinforced) VALUES "
                   "('bk1', ?, ?, 'studied_by', 1.0, 0, 0)", (me, harvard))
@@ -99,6 +103,8 @@ class IntegrityTests(BrainTestCase):
         self.assertIn("brain move <area> <broader>", r.summary())
         self.assertEqual(r.category_links, 1)
         self.assertEqual(r.misoriented, [("Alvin", "studied_by", "Harvard")])
+        self.assertEqual(r.redundant_links, 1)
+        self.assertIn("1 relates_to edge(s) doubling a part_of (brain repair)", r.summary())
         self.assertIn("1 edge(s) written backwards: Alvin studied_by Harvard (brain repair)", r.summary())
         self.assertIn("1 cross-link(s) to a category (brain repair)", r.summary())
         self.assertEqual(r.fact_parents, [("Alvin's Residence (US)", ["Alvin's computer"]),
@@ -116,8 +122,10 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(fixed["dangling"], 1)         # the ghost's edge is gone
         self.assertEqual(fixed["category_links"], 1)   # Harvard relates_to Education: gone
         self.assertEqual(fixed["oriented"], 1)         # Alvin studied_by Harvard: turned round
+        self.assertEqual(fixed["redundant_links"], 1)  # the relates_to beside DS Program's part_of Harvard: gone
         after = integrity.check(self.conn, "Alvin")
         self.assertEqual(after.misoriented, [])
+        self.assertEqual(after.redundant_links, 0)
         self.assertEqual(integrity.check(self.conn, "Alvin").category_links, 0)
         self.assertEqual(integrity.check(self.conn, "Alvin").dangling_edges, 0)
         self.assertEqual(fixed["orphans"], 6)          # Boston + the five parentless people/task nodes

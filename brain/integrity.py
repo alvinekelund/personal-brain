@@ -47,6 +47,7 @@ class Report:
     fact_parents: list[tuple[str, list[str]]] = field(default_factory=list)  # a fact with children: a leaf used as a container
     category_links: int = 0                                       # cross-links (non-part_of) touching a category: structure noise
     misoriented: list[tuple[str, str, str]] = field(default_factory=list)   # passive relations written backwards
+    redundant_links: int = 0                                      # relates_to beside a part_of between the same two nodes
 
     @property
     def structural(self) -> int:
@@ -58,7 +59,8 @@ class Report:
     def clean(self) -> bool:
         return (self.structural == 0 and not self.duplicates and not self.legacy_tasks
                 and not self.oversized and not self.flat_lists and not self.thin_areas
-                and not self.fact_parents and not self.category_links and not self.misoriented)
+                and not self.fact_parents and not self.category_links and not self.misoriented
+                and not self.redundant_links)
 
     def summary(self) -> str:
         bits = []
@@ -71,6 +73,8 @@ class Report:
         if self.dangling_edges: bits.append(f"{self.dangling_edges} dangling edge(s) to deleted nodes")
         if self.legacy_tasks: bits.append(f"{len(self.legacy_tasks)} legacy task node(s)")
         if self.category_links: bits.append(f"{self.category_links} cross-link(s) to a category (brain repair)")
+        if self.redundant_links:
+            bits.append(f"{self.redundant_links} relates_to edge(s) doubling a part_of (brain repair)")
         if self.misoriented:
             bits.append(f"{len(self.misoriented)} edge(s) written backwards: "
                         + "; ".join(f"{a} {rel} {b}" for a, rel, b in self.misoriented[:2]) + " (brain repair)")
@@ -200,6 +204,11 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
                         r.duplicates.append(pair)
                         listed.add(frozenset(pair))
     r.semantic_duplicates.sort(key=lambda x: -x[2])
+    # a relates_to beside a part_of between the same two nodes says nothing the spine does not
+    r.redundant_links = conn.execute(
+        "SELECT COUNT(*) FROM edges r WHERE r.relation = 'relates_to' AND EXISTS (SELECT 1 FROM edges p WHERE p.relation = 'part_of' "
+        "AND ((p.source_id = r.source_id AND p.target_id = r.target_id) OR (p.source_id = r.target_id AND p.target_id = r.source_id)))"
+    ).fetchone()[0]
     # passive relations written backwards ("Alvin studied_by Harvard"): the agent belongs at the target
     for s_, t_, rel in conn.execute("SELECT source_id, target_id, relation FROM edges WHERE relation IN ('studied_by', 'attended_by', 'created_by')"):
         if s_ in nodes and t_ in nodes and db.orient_edge(conn, s_, t_, rel) != (s_, t_):
@@ -335,10 +344,11 @@ def repair(conn, user: str) -> dict:
     - cycle: cut the part_of edge leaving the node with the larger subtree;
     - dangling edge (its source or target node was deleted): removed;
     - cross-link touching a category (structure noise a merge left behind): removed;
-    - passive relation written backwards ("Alvin studied_by Harvard"): turned round.
+    - passive relation written backwards ("Alvin studied_by Harvard"): turned round;
+    - relates_to beside a part_of between the same two nodes: removed.
     Never deletes or renames nodes; duplicates and embeddings are reported, not fixed."""
     out = {"multi_parent": 0, "categories": 0, "under_identity": 0, "orphans": 0, "cycles": 0,
-           "dangling": 0, "category_links": 0, "oriented": 0}
+           "dangling": 0, "category_links": 0, "oriented": 0, "redundant_links": 0}
     db.ensure_identity_anchor(conn, user)
     ident = db.get_node_by_name(conn, user)["id"]
     # 0. edges to nodes that no longer exist
@@ -351,6 +361,11 @@ def repair(conn, user: str) -> dict:
             db.delete_edge(conn, e["id"])
             db.add_edge(conn, src, tgt, e["relation"], e["weight"])
             out["oriented"] += 1
+    # 0a'. relates_to beside a part_of between the same two nodes
+    out["redundant_links"] = conn.execute(
+        "DELETE FROM edges WHERE relation = 'relates_to' AND id IN (SELECT r.id FROM edges r JOIN edges p ON p.relation = 'part_of' "
+        "AND ((p.source_id = r.source_id AND p.target_id = r.target_id) OR (p.source_id = r.target_id AND p.target_id = r.source_id)) "
+        "WHERE r.relation = 'relates_to')").rowcount
     # 0b. cross-links touching a category: structure, not knowledge
     out["category_links"] = conn.execute(
         "DELETE FROM edges WHERE relation != 'part_of' AND (source_id IN (SELECT id FROM nodes WHERE type = 'category') "

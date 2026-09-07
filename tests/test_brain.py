@@ -103,8 +103,9 @@ class DecayClockTests(BrainTestCase):
     def test_part_of_edges_are_clamped_never_pruned(self):
         a = db.add_node(self.conn, "Leaf", type_="concept")
         cat = db.add_node(self.conn, "Area", type_="category")
+        other = db.add_node(self.conn, "Other leaf", type_="concept")
         spine = db.add_edge(self.conn, a, cat, "part_of")
-        cross = db.add_edge(self.conn, a, cat, "relates_to")
+        cross = db.add_edge(self.conn, a, other, "relates_to")   # a relates_to beside the part_of itself is refused now
         self._age_edge(spine, 3650)
         self._age_edge(cross, 3650)
         r = decay.run_decay(self.conn)
@@ -1183,6 +1184,21 @@ class MergeTests(BrainTestCase):
         names = [n["name"] for n in db.all_nodes(self.conn)]
         self.assertEqual(names.count("attention mechanisms"), 1)
         self.assertNotIn("attention", names)
+
+
+class RedundantLinkTests(BrainTestCase):
+    def test_relates_to_never_doubles_a_part_of(self):
+        """16 node pairs carried a relates_to beside their part_of on Sep 6 2026
+        — the graph view listed a child as 'relates_to' under its own parent."""
+        club = db.add_node(self.conn, "Aalto Triathlon Club", type_="organization")
+        kit = db.add_node(self.conn, "Team kit", type_="artifact")
+        spine = db.add_edge(self.conn, kit, club, "part_of")
+        self.assertEqual(db.add_edge(self.conn, kit, club, "relates_to"), spine)      # either direction
+        self.assertEqual(db.add_edge(self.conn, club, kit, "relates_to"), spine)
+        used = db.add_edge(self.conn, kit, club, "used_in")                             # a typed link still adds
+        self.assertNotEqual(used, spine)
+        rels = sorted(e["relation"] for e in db.all_edges(self.conn))
+        self.assertEqual(rels, ["part_of", "used_in"])
 
 
 class EdgeOrientationTests(BrainTestCase):

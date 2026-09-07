@@ -255,7 +255,7 @@ class DoctorTests(unittest.TestCase):
         me = db.get_node_by_name(conn, "Alvin")["id"]
         edu = db.add_node(conn, "Education", type_="category"); db.add_edge(conn, edu, me, "part_of")
         h = db.add_node(conn, "Harvard", type_="organization"); db.add_edge(conn, h, edu, "part_of")
-        db.add_edge(conn, h, edu, "relates_to")
+        db.add_edge(conn, h, edu, "used_in")                    # any cross-link to a category is noise
         for nid in (me, edu, h):
             db.set_embedding(conn, nid, [0.1, 0.2])
         conn.commit(); conn.close()
