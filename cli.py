@@ -1084,7 +1084,7 @@ def stale(days):
     (a plan dated "as of <month year>" is deliberate and never listed)."""
     from brain import integrity
     conn = db.connect()
-    rows = integrity.stale_claims(conn, days=days or integrity.STALE_CLAIM_DAYS)
+    rows = integrity.stale_claims(conn, days=days or integrity.STALE_CLAIM_DAYS, root=_vault_root())
     if not rows:
         click.echo(f"No plan-tense claim older than {days or integrity.STALE_CLAIM_DAYS} days.")
         return

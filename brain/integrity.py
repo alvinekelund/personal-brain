@@ -424,23 +424,46 @@ def _passed_date(content: str, today) -> str | None:
     return f"{m.group(0).strip()} (passed)" if when < today else None
 
 
-def stale_claims(conn, days: int = STALE_CLAIM_DAYS, now: float | None = None) -> list[tuple[str, str, int]]:
+_LOOP_REF = re.compile(r"\bL-\d{3}\b")
+
+
+def _closed_loops(root) -> set[str]:
+    """Ids of closed loops in the vault's ledger (empty when there is no vault)."""
+    try:
+        from brain import config, loops
+        root = root if root is not None else config.vault_dir()
+        return {l.id for l in loops.load(root).closed}
+    except Exception:
+        return set()
+
+
+def stale_claims(conn, days: int = STALE_CLAIM_DAYS, now: float | None = None,
+                 root=None) -> list[tuple[str, str, int]]:
     """Nodes whose content still speaks in plan or present tense ("plans to
     enroll", "is currently trying to") `days` after they were written. A
     backfill of old mail wrote "Alvin plans to relocate to Boston" and "plans
     to pursue studies" at Harvard three months before anyone read them, and
     ingest appends on re-mention, so the stale sentence keeps standing.
     Returns (name, phrase, age_days), oldest first. A claim dated with "as of"
-    is deliberate and skipped — date a long-running plan and it stops nagging."""
+    is deliberate and skipped — date a long-running plan and it stops nagging.
+    Content citing a loop that has since closed is listed too (`root` is the
+    vault; None means the configured one)."""
     import time
     now = now or time.time()
     today = date.fromtimestamp(now)
+    closed = _closed_loops(root)
     out = []
     for n in db.all_nodes(conn):
         if n["type"] == "category":
             continue
         content = n["content"] or ""
         age = int((now - n["created_at"]) // 86400)
+        # content that leans on a loop ("Venmo is holding the money (L-063)") is
+        # stale the moment that loop closes, whatever its age
+        cited = [lid for lid in dict.fromkeys(_LOOP_REF.findall(content)) if lid in closed]
+        if cited:
+            out.append((n["name"], f"cites closed {', '.join(cited)}", age))
+            continue
         passed = _passed_date(content, today)       # a dated future claim is stale the day after, whatever its age
         if passed:
             out.append((n["name"], passed, age))

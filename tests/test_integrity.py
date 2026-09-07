@@ -256,6 +256,27 @@ class IntegrityTests(BrainTestCase):
         c.commit()
         self.assertEqual([n for n, _, _ in integrity.stale_claims(c, now=sep20)], ["HackMIT"])
 
+    def test_content_citing_a_closed_loop_is_stale(self):
+        """Node contents written today lean on loops ('Venmo is holding the
+        money (L-063)'); the moment the loop closes the sentence is wrong,
+        whatever the node's age."""
+        import brain.loops as loops
+        from datetime import date as _date
+        root = self.vault_tmp
+        loops.add(root, "Venmo verification", "2026-09-08", "alvin", "life", "upload ID", today=_date(2026, 9, 1), commit=False)
+        loops.add(root, "SSN appointment", "2026-09-12", "alvin", "life", "book", today=_date(2026, 9, 1), commit=False)
+        loops.done(root, "L-001", note="verified", today=_date(2026, 9, 6), commit=False)
+        c = self.conn
+        venmo = db.add_node(c, "Venmo account", type_="artifact", content="Venmo is holding the repayments pending verification (L-001).")
+        ssn = db.add_node(c, "SSN", type_="fact", content="Alvin has no SSN yet; the appointment is L-002.")
+        c.commit()
+        rows = integrity.stale_claims(c, root=root)
+        self.assertEqual([(n, p) for n, p, _ in rows], [("Venmo account", "cites closed L-001")])
+        self.assertEqual(integrity.stale_claims(c, root=self.vault_tmp / "nowhere"), [])   # no ledger: nothing to say
+        db.set_content(c, venmo, "Venmo verification cleared on Sep 6, 2026; the repayments came through.")
+        c.commit()
+        self.assertEqual(integrity.stale_claims(c, root=root), [])
+
     def test_norm_ignores_possessives(self):
         self.assertEqual(integrity._norm("Alvin's Girlfriend"), "girlfriend")
         self.assertEqual(integrity._norm("The MIT-identity!"), "mit identity")

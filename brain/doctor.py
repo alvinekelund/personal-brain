@@ -177,7 +177,7 @@ def check_backups(backups_dir: Path = DATA_DIR / "backups", now: float | None = 
     return Check("backups", "ok", f"{len(files)} snapshot(s), newest {age_d * 24:.0f}h ago ({newest.name})")
 
 
-def check_claims(db_path: Path, now: float | None = None, user: str = "") -> Check:
+def check_claims(db_path: Path, now: float | None = None, user: str = "", root: Path | None = None) -> Check:
     """Content integrity: nodes still saying "plans to" / "is currently" a month
     after they were written are claims nobody re-read ("Alvin plans to relocate
     to Boston", 91 days on, from a mail backfill). The cure is a restatement."""
@@ -188,7 +188,7 @@ def check_claims(db_path: Path, now: float | None = None, user: str = "") -> Che
     try:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
-        stale = integrity.stale_claims(conn, now=now)
+        stale = integrity.stale_claims(conn, now=now, root=root)
         conn.close()
     except sqlite3.Error as e:
         return Check("claims", "fail", f"cannot read graph: {e}")
@@ -417,7 +417,7 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         brief_log: Path | None = DATA_DIR / "brief.log",
         backups_dir: Path | None = DATA_DIR / "backups") -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
-              check_claims(db_path, now), check_key(), check_api(api_probe)]
+              check_claims(db_path, now, root=root), check_key(), check_api(api_probe)]
     if backups_dir is not None:
         checks.append(check_backups(backups_dir, now))
     checks.append(check_coverage(db_path))
