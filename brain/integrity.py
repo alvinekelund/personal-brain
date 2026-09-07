@@ -21,6 +21,7 @@ FALLBACK_CATEGORY = {
     "fact": "Knowledge", "insight": "Insights", "concept": "Knowledge",
 }
 DUP_RATIO = 0.9
+SEMANTIC_DUP_MIN = 0.89   # cosine between two same-type nodes' stored embeddings that means "the same thing twice"
 _STRIP = re.compile(r"[^a-z0-9 ]+")
 _POSSESSIVE = re.compile(r"\b(?:alvin'?s?|my|the)\b")
 
@@ -36,6 +37,7 @@ class Report:
     dangling_edges: int = 0                                       # edges whose source/target node no longer exists
     missing_embeddings: int = 0
     duplicates: list[tuple[str, str]] = field(default_factory=list)  # suspiciously similar names, same type
+    semantic_duplicates: list[tuple[str, str, float]] = field(default_factory=list)  # same type, embeddings agree (also in duplicates)
     legacy_tasks: list[str] = field(default_factory=list)
     oversized: list[tuple[str, int]] = field(default_factory=list)   # categories with too many direct children
     flat_lists: list[tuple[str, int]] = field(default_factory=list)  # a non-category node with that many children: a list, not structure
@@ -149,6 +151,42 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
     r.flat_lists = sorted(((nodes[p]["name"], c) for p, c in child_count.items()
                            if nodes[p]["type"] != "category" and p != ident_id and c > oversized_threshold),
                           key=lambda x: -x[1])
+    # the same thing under two names: two same-type nodes whose stored embeddings
+    # all but coincide ("Current Semester Start" beside "SM Data Science Start"
+    # scored 0.896 on Sep 6 2026 while every name check passed). Parent/child
+    # pairs are structure, not duplicates; no model call — the vectors are stored.
+    import json
+    import math
+    unit: dict[str, list[float]] = {}
+    for nid, n in nodes.items():
+        if n["type"] == "category" or not n["embedding"]:
+            continue
+        try:
+            vec = json.loads(n["embedding"])
+            norm = math.sqrt(sum(x * x for x in vec))
+        except (TypeError, ValueError):
+            continue
+        if norm:
+            unit[nid] = [x / norm for x in vec]
+    by_type: dict[str, list[str]] = {}
+    for nid in unit:
+        by_type.setdefault(nodes[nid]["type"], []).append(nid)
+    listed = {frozenset(p) for p in r.duplicates}
+    for group in by_type.values():
+        for i in range(len(group)):
+            a = group[i]
+            for j in range(i + 1, len(group)):
+                b = group[j]
+                if b in parents.get(a, []) or a in parents.get(b, []):
+                    continue
+                cos = sum(x * y for x, y in zip(unit[a], unit[b]))
+                if cos >= SEMANTIC_DUP_MIN:
+                    pair = (nodes[a]["name"], nodes[b]["name"])
+                    r.semantic_duplicates.append((pair[0], pair[1], round(cos, 3)))
+                    if frozenset(pair) not in listed:
+                        r.duplicates.append(pair)
+                        listed.add(frozenset(pair))
+    r.semantic_duplicates.sort(key=lambda x: -x[2])
     # a top-level area with almost nothing under it, in a graph that has had time
     # to fill, is a sub-category that got rooted ("Family" beside "Relationships")
     # or an empty template area ("Health"): sprawl the planner is told to avoid

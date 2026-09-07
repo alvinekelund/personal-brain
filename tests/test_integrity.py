@@ -141,6 +141,35 @@ class IntegrityTests(BrainTestCase):
         self.assertEqual(r.summary(), "tree intact")
         self.assertEqual(r.thin_areas, [])        # one area with one node: a young brain, not sprawl
 
+    def test_semantic_duplicates_from_stored_embeddings(self):
+        """Two same-type nodes whose embeddings all but coincide are the same
+        thing twice ("Current Semester Start" / "SM Data Science Start", 0.896
+        on Sep 6 2026, invisible to every name check). Parent/child pairs and
+        cross-type pairs are not duplicates; no embedding, no opinion."""
+        c = self.conn
+        db.ensure_identity_anchor(c, "Alvin")
+        me = db.get_node_by_name(c, "Alvin")["id"]
+        edu = db.add_node(c, "Education", type_="category"); db.add_edge(c, edu, me, "part_of")
+        a = db.add_node(c, "Current Semester Start", type_="event"); db.add_edge(c, a, edu, "part_of")
+        b = db.add_node(c, "SM Data Science Start", type_="event"); db.add_edge(c, b, edu, "part_of")
+        other = db.add_node(c, "Fall Deadlines", type_="event"); db.add_edge(c, other, edu, "part_of")
+        org = db.add_node(c, "Harvard", type_="organization"); db.add_edge(c, org, edu, "part_of")
+        child = db.add_node(c, "Harvard SEAS", type_="organization"); db.add_edge(c, child, org, "part_of")
+        blank = db.add_node(c, "No vector", type_="event"); db.add_edge(c, blank, edu, "part_of")
+        for nid, vec in ((a, [1.0, 0.0, 0.0]), (b, [0.99, 0.1, 0.0]), (other, [0.0, 1.0, 0.0]),
+                         (org, [1.0, 0.0, 0.0]), (child, [1.0, 0.0, 0.0]), (edu, [1.0, 0.0, 0.0])):
+            db.set_embedding(c, nid, vec)
+        c.commit()
+        r = integrity.check(c, "Alvin")
+        self.assertEqual([(x, y) for x, y, _ in r.semantic_duplicates], [("Current Semester Start", "SM Data Science Start")])
+        self.assertGreaterEqual(r.semantic_duplicates[0][2], integrity.SEMANTIC_DUP_MIN)
+        self.assertIn(("Current Semester Start", "SM Data Science Start"), r.duplicates)   # the merge hint path sees it
+        self.assertFalse([p for p in r.duplicates if "Harvard" in p[0]])                  # parent/child, and cross-type vs the category
+        self.assertFalse(r.clean)
+        db.merge_nodes(c, b, a)
+        c.commit()
+        self.assertEqual(integrity.check(c, "Alvin").semantic_duplicates, [])
+
     def test_stale_claims_are_old_plan_tense_content(self):
         """A June mail backfill wrote "Alvin plans to relocate to Boston" and
         "plans to pursue studies" at Harvard; 91 days later, enrolled and living
