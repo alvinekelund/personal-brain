@@ -934,6 +934,35 @@ class ReorganizeTests(BrainTestCase):
         self.assertEqual(db.get_node_by_name(self.conn, "Hobbies")["type"], "category")
         self.assertAlmostEqual(db.get_node_by_name(self.conn, "football")["importance"], 0.6, places=2)
 
+    def test_reorganize_offers_the_planner_sub_categories(self):
+        """After `brain subgroup`, a re-plan was offered a flat list of category
+        names; it could file nodes back under the top-level areas and undo the
+        split. The planner now sees "Area > Sub-category" and is told to prefer
+        the most specific one and answer with the bare name."""
+        db.ensure_identity_anchor(self.conn, "Alvin")
+        me = db.get_node_by_name(self.conn, "Alvin")["id"]
+        career = db.add_node(self.conn, "Career", type_="category"); db.add_edge(self.conn, career, me, "part_of")
+        sub = db.add_node(self.conn, "Companies & Organizations", type_="category")
+        db.add_edge(self.conn, sub, career, "part_of")
+        bain = db.add_node(self.conn, "Bain & Company", type_="organization"); db.add_edge(self.conn, bain, sub, "part_of")
+        self.conn.commit()
+        captured = {}
+        orig = llm.generate
+        llm.generate = lambda p, *a, **k: (captured.setdefault("p", p),
+                                           json.dumps({"nodes": [{"name": "Bain & Company", "parent": "Companies & Organizations", "importance": 0.6}]}))[1]
+        try:
+            extract.reorganize(self.conn, "Alvin")
+        finally:
+            llm.generate = orig
+        self.assertIn("Career > Companies & Organizations", captured["p"])
+        self.assertIn("MOST SPECIFIC", captured["p"])
+        parents = [e["target_id"] for e in db.edges_for_node(self.conn, bain)
+                   if e["source_id"] == bain and e["relation"] == "part_of"]
+        self.assertEqual(parents, [sub])                                          # still under the sub-category
+        sub_parents = [e["target_id"] for e in db.edges_for_node(self.conn, sub)
+                       if e["source_id"] == sub and e["relation"] == "part_of"]
+        self.assertEqual(sub_parents, [career])                                   # the sub-category survived
+
 
 class SubgroupTests(BrainTestCase):
     def test_oversized_category_is_split(self):

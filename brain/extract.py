@@ -443,7 +443,9 @@ def plan_hierarchy(nodes: list, user: str, categories: list | None = None) -> li
         f"category it belongs under) and an 'importance' (0.0-1.0).\n"
         f"- {user}'s ONLY direct children are broad category nodes (Career, Hobbies, "
         f"Relationships, Health, Education, ...); never attach a node directly to {user}.\n"
-        f"- reuse these existing categories when they fit: "
+        f"- reuse these existing categories when they fit — an entry written 'Area > Sub-category' "
+        f"is a sub-category under that area: prefer the MOST SPECIFIC existing one and give its "
+        f"bare name as the parent ('Companies & Organizations', not 'Career > Companies & Organizations'): "
         f"{', '.join(categories or []) or '(none yet)'}\n"
         f"- importance: identity/close people/core skills/long-term → 0.8-1.0; "
         f"general interests → 0.4-0.7; one-off details → 0.1-0.3.\n\n"
@@ -694,7 +696,7 @@ def reorganize(conn, user: str):
              if n["type"] != "category" and n["name"].lower() != (user or "").lower()]
     if not nodes:
         return (0, 0)
-    categories = [n["name"] for n in db.all_nodes(conn) if n["type"] == "category"]
+    categories = category_labels(conn)   # "Area > Sub-category" for sub-categories, so a re-plan keeps them
     plan = plan_hierarchy(nodes, user, categories)
     existing = {n["name"].strip().lower() for n in nodes}
     plan = [p for p in plan if (p.get("name") or "").strip().lower() in existing]
