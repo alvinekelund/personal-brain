@@ -361,17 +361,24 @@ def build(conn, root: Path, embed: bool = True) -> dict:
     stats["node_links"] = link_nodes(conn, records)
     conn.commit()
 
+    stats["embed_failed"] = False
+    stats["pending"] = 0
     if embed and to_embed and llm.have_key():
-        for rec in to_embed:
+        for i, rec in enumerate(to_embed):
             try:
                 vec = llm.embed(rec["embed_text"])
             except Exception:
-                continue
+                # fail fast: with the API down each file would burn its whole budget
+                # (a three-file index took eight minutes on Sep 6 2026). The rest stay
+                # unembedded and the next `brain index` picks them up.
+                stats["embed_failed"] = True
+                stats["pending"] = len(to_embed) - i
+                break
             conn.execute("UPDATE vault_files SET embedding = ? WHERE path = ?",
                          (db.encode_embedding(vec), rec["path"]))
             stats["embedded"] += 1
         conn.commit()
-    stats["ledger_embedded"] = embed_ledgers(conn, root, embed=embed)
+    stats["ledger_embedded"] = embed_ledgers(conn, root, embed=embed and not stats["embed_failed"])
     return stats
 
 

@@ -204,6 +204,24 @@ class BuildTests(IndexTestCase):
         index.build(self.conn, self.root, embed=False)
         self.assertIsNone(db.get_node(self.conn, cat)["path"])                  # structure has no file
 
+    def test_embedding_fails_fast_when_the_api_is_down(self):
+        """With the API down each file burned its whole embed budget in turn: a
+        three-file index took eight minutes on Sep 6 2026. The first failure
+        ends embedding for the run; the rest wait for the next index."""
+        calls = []
+        orig_have, orig_embed = llm.have_key, llm.embed
+        llm.have_key = lambda: True
+        llm.embed = lambda *a, **k: (calls.append(1), (_ for _ in ()).throw(RuntimeError("timeout")))[1]
+        try:
+            s = index.build(self.conn, self.root, embed=True)
+        finally:
+            llm.have_key, llm.embed = orig_have, orig_embed
+        self.assertEqual(len(calls), 1)                                          # one attempt, not one per file
+        self.assertTrue(s["embed_failed"])
+        self.assertGreater(s["pending"], 0)
+        self.assertEqual(s["embedded"], 0)
+        self.assertEqual(s["ledger_embedded"], 0)                                # the ledgers were not tried either
+
     def test_unchanged_files_still_get_a_recomputed_kind(self):
         """kind is derived from the path, not read from the file: when the rule
         changed (apps/ files became 'app') every unchanged file kept the old

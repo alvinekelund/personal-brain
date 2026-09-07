@@ -479,6 +479,9 @@ def index_cmd(no_embed, show_status):
                f"{s['removed']} removed, {s['unchanged']} unchanged · {s['links']} file link(s), "
                f"{s['node_links']} node link(s), {s['embedded']} embedded · "
                f"{s['ledger_embedded']} ledger line(s) embedded")
+    if s.get("embed_failed"):
+        click.echo(f"  embedding paused: the API did not answer — {s['pending']} file(s) still to embed; "
+                   "run `brain index` again later", err=True)
     if s["no_frontmatter"]:
         click.echo("  no front-matter: " + ", ".join(s["no_frontmatter"][:10]))
 
