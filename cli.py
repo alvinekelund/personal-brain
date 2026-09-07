@@ -994,6 +994,24 @@ def decisions_cmd(do_lint, last):
         click.echo(f"✗ {e}", err=True)
 
 
+def _auto_backup():
+    """Take a snapshot when the newest is stale (doctor.BACKUP_MAX_AGE_D days) or
+    none exists. The daily card runs every morning and at every session start,
+    so the doctor's backups line heals itself without a scheduled task. Best
+    effort: the card must never fail because of it. Returns the path or None."""
+    import time as _time
+    try:
+        bdir = doctor_mod.DATA_DIR / "backups"
+        files = list(bdir.glob("brain-*.db")) if bdir.is_dir() else []
+        newest = max((f.stat().st_mtime for f in files), default=0.0)
+        if _time.time() - newest < doctor_mod.BACKUP_MAX_AGE_D * 86400:
+            return None
+        dest, _ = db.backup(db.connect(), bdir, label="auto")
+        return dest
+    except Exception:
+        return None
+
+
 @cli.command()
 @click.option("--date", "today", default=None, help="Pretend today is YYYY-MM-DD.")
 @click.option("--days", default=7, show_default=True, help="Due-soon horizon.")
@@ -1003,6 +1021,7 @@ def today(today, days, brief, no_doctor):
     """Deterministic action card: countdowns, waits, Claude-owned loops, top actions."""
     root = _vault_root()
     day = _parse_day(today)
+    _auto_backup()
     if brief:
         line = loops.brief(root, day)
         # record what the phone got: the weekly review could not verify a single

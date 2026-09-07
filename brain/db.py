@@ -328,13 +328,19 @@ def backup(conn, backups_dir, label: str = "", keep: int = BACKUP_KEEP) -> tuple
     stamp = time.strftime("%Y-%m-%d-%H%M%S")
     tag = "-" + "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in label.strip()) if label.strip() else ""
     dest = backups_dir / f"brain-{stamp}{tag}.db"
+    k = 2
+    while dest.exists():                       # two snapshots inside one second must not overwrite each other
+        dest = backups_dir / f"brain-{stamp}{tag}-{k}.db"
+        k += 1
     out = sqlite3.connect(str(dest))
     try:
         conn.backup(out)
     finally:
         out.close()
     pruned = 0
-    for old in sorted(backups_dir.glob("brain-*.db"), key=lambda p: p.name, reverse=True)[max(keep, 1):]:
+    others = sorted((p for p in backups_dir.glob("brain-*.db") if p != dest),
+                    key=lambda p: (p.stat().st_mtime, p.name), reverse=True)   # newest first; the new one always stays
+    for old in others[max(keep, 1) - 1:]:
         old.unlink()
         pruned += 1
     return dest, pruned

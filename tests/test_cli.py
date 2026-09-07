@@ -175,6 +175,26 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 1)
         self.assertIn("No link", r.output)
 
+    def test_today_snapshots_when_the_newest_backup_is_stale(self):
+        import os, tempfile, time
+        import brain.doctor as doctor
+        orig = doctor.DATA_DIR
+        doctor.DATA_DIR = Path(tempfile.mkdtemp())
+        try:
+            r = self.run_cli("today", "--no-doctor")
+            self.assertEqual(r.exit_code, 0, r.output)
+            files = sorted((doctor.DATA_DIR / "backups").glob("brain-*.db"))
+            self.assertEqual(len(files), 1)                                   # none existed: one taken
+            self.assertIn("-auto", files[0].name)
+            self.run_cli("today", "--no-doctor")
+            self.assertEqual(len(list((doctor.DATA_DIR / "backups").glob("brain-*.db"))), 1)   # fresh: none taken
+            old = time.time() - (doctor.BACKUP_MAX_AGE_D + 1) * 86400
+            os.utime(files[0], (old, old))
+            self.run_cli("today", "--no-doctor")
+            self.assertEqual(len(list((doctor.DATA_DIR / "backups").glob("brain-*.db"))), 2)   # stale: another
+        finally:
+            doctor.DATA_DIR = orig
+
     def test_backup_snapshots_and_prunes(self):
         import sqlite3, tempfile
         import brain.doctor as doctor

@@ -183,7 +183,7 @@ brain describe <node> "<text>"   # replace the content (a correction; add append
 brain subgroup [--threshold N]   # split oversized categories into LLM-clustered sub-categories
 
 # Backup / portability
-brain backup [--label X] [--keep N]   # consistent brain.db snapshot into ~/.personal-brain/backups/ (SQLite backup API), pruned to N
+brain backup [--label X] [--keep N]   # consistent brain.db snapshot into ~/.personal-brain/backups/ (SQLite backup API), pruned to N; `brain today` takes one itself when the newest is over 7 days old
 brain export backup.json         # dump the whole graph to JSON, embeddings included (--lean to leave them out)
 brain import backup.json         # merge a JSON export back in (skips duplicates)
 ```
