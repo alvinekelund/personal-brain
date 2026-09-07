@@ -44,6 +44,8 @@ KIND_PRIORITY = {"person": 0, "org": 1, "project": 2, "course": 3, "application"
 ALIAS_KEYS = ("person", "app", "area", "code", "project", "org")
 LINK_RE = re.compile(r"(?<![\w/])((?:profile|courses|applications|orgs|projects|people|apps|topics|docs|areas|log)/[\w.\-]+\.md|ALVIN\.md|IDENTITY\.md)")
 MAX_TOKENS = 3000
+INDEX_KINDS = {"readme", "hub"}   # index pages: they list everything, so they match everything
+INDEX_DISCOUNT = 0.6              # ...and get this much of their keyword score
 SEMANTIC_MIN = 0.4          # cosine below this adds nothing
 SEMANTIC_ONLY_MIN = 0.5     # a file with no keyword hit needs at least this to appear
 EMBED_CHARS = 1500
@@ -554,6 +556,12 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
             if cos >= SEMANTIC_MIN and (score > 0 or cos >= SEMANTIC_ONLY_MIN):
                 score += 5 * cos
                 why.append(f"semantic {cos:.2f}")
+        if score > 0 and r["kind"] in INDEX_KINDS:
+            # a shelf README or the hub lists every name on the shelf, so it out-hits
+            # the one file that actually answers ("What did Alvin build at Miracle?"
+            # put projects/README.md above the org and project files on Sep 6 2026)
+            score *= INDEX_DISCOUNT
+            why.append("index page")
         if score > 0:
             hits[r["path"]] = {"path": r["path"], "title": r["title"], "kind": r["kind"],
                                "score": round(score, 3), "why": why, "updated": r["updated"] or ""}

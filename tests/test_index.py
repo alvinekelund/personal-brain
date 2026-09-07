@@ -300,6 +300,20 @@ class SearchTests(IndexTestCase):
         self.assertEqual(index.search(self.conn, "Heli")[0]["path"], "people/heli.md")
         self.assertEqual(index.search(self.conn, "transcript")[0]["path"], "profile/education.md")  # alias only
 
+    def test_index_pages_rank_below_the_file_that_answers(self):
+        """projects/README.md lists every project, so 'What did Alvin build at
+        Miracle?' scored it above the org and project files on Sep 6 2026."""
+        w(self.root / "projects/README.md",
+          "---\ntype: readme\nname: Projects shelf\n---\n# Projects\n- Siemens contract library (Miracle)\n- Cadentia tracker (Miracle)\n- Tender PoC (Miracle)\n")
+        w(self.root / "projects/siemens.md",
+          "---\ntype: project\nname: Siemens contract library\nupdated: 2026-09-01\n---\n# Siemens\n- Built at Miracle for Siemens Energy.\n")
+        index.build(self.conn, self.root, embed=False)
+        hits = index.search(self.conn, "what did Alvin build at Miracle", k=8)
+        paths = [h["path"] for h in hits]
+        self.assertIn("projects/README.md", paths)                              # still findable
+        self.assertLess(paths.index("projects/siemens.md"), paths.index("projects/README.md"))
+        self.assertIn("index page", next(h for h in hits if h["path"] == "projects/README.md")["why"])
+
     def test_body_matches_and_no_match(self):
         hits = index.search(self.conn, "Maxwell Dworkin")
         self.assertEqual(hits[0]["path"], "courses/stat-211.md")
