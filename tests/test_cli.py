@@ -152,6 +152,17 @@ class CliTests(BrainTestCase):
         self.assertEqual(r.exit_code, 0, r.output)
         self.assertEqual(db.get_node(self.conn, self.padel)["archived"], 1)
 
+    def test_decay_refreshes_the_views_when_it_archives(self):
+        import time
+        old = time.time() - 3650 * 86400
+        self.conn.execute("UPDATE nodes SET last_accessed = ?, last_decayed = ?, importance = 0.0 WHERE id = ?", (old, old, self.padel))
+        self.conn.commit()
+        r = self.run_cli("decay")
+        self.assertEqual(r.exit_code, 0, r.output)
+        self.assertIn("archived=1", r.output)
+        views = "".join(f.read_text() for f in (self.vault_tmp / "graph").glob("*.md"))
+        self.assertNotIn("Padel", views)                                       # rendered after the archive
+
     def test_prune_deletes_archived_nodes_and_says_which(self):
         self.run_cli("forget", "Padel")
         r = self.run_cli("prune")
