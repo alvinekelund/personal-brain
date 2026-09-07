@@ -493,7 +493,7 @@ def reindex(everything):
 
 @cli.command()
 def synthesize():
-    """Run the synthesis job (find connections, surface insights)."""
+    """Connect isolated nodes to the rest of the graph via the model (no insights are written)."""
     conn = db.connect()
     _run_decay(conn)
     _synthesize(conn)

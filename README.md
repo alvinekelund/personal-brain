@@ -155,7 +155,7 @@ brain loop inbox [--drop N | --clear]            # action items the extractor fo
 brain decide "Fourth-seat plan of record" --what "..." --why "..." --rejected "..." --revisit "..."
 brain decisions [--last 5] [--lint]              # DECISIONS.md is append-only (git pre-commit enforced)
 brain today [--brief] [--date YYYY-MM-DD]        # action card: health line, countdowns, waits, Claude-owned loops, top 3
-brain doctor [--brief] [--install-hooks] [--repair]  # binary, graph + tree integrity, key+TLS, capture, vault, ledgers, NOW.md, hooks, MCP, tasks
+brain doctor [--brief] [--install-hooks] [--repair]  # binary, graph + tree integrity, stale claims, backups, coverage, key+TLS, capture, brief, vault, ledgers, NOW.md, hooks, MCP, tasks
 brain repair                                     # one parent per node, categories under you, no orphans/cycles (never deletes)
 brain stale [--days N]                           # claims still in plan-tense ("plans to", "is currently") after N days (default 30): restate with describe
 brain now render | show | lint                   # NOW.md is GENERATED: IDENTITY.md + loops by area + areas/*.md `## Now` + people + apps
