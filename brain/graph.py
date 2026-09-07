@@ -4,7 +4,7 @@ import json
 import re
 import math
 from collections import deque
-from brain import db, decay, llm
+from brain import config, db, decay, llm
 
 
 def bfs(conn, start_ids: list[str], depth: int = 3, min_weight: float = 0.2,
@@ -379,10 +379,10 @@ def answer_question(conn, question: str, k: int = 8, min_weight: float = 0.0,
     answer = llm.generate(prompt).strip()
     sources = ledger_sources + [f["path"] for f in files] + [n["name"] for n in seeds]
     return {"answer": answer, "sources": sources, "files": [f["path"] for f in files],
-            "cited": cited_sources(answer, sources)}
+            "cited": cited_sources(answer, sources, owner=config.get_user())}
 
 
-def cited_sources(answer: str, sources: list) -> list:
+def cited_sources(answer: str, sources: list, owner: str = "") -> list:
     """The retrieved sources the answer actually leans on — the ones it names
     (ledger ids as whole tokens, file paths and node names as text). A question
     about the fourth course seat retrieved 25 items and cited 4; the other 21
@@ -391,8 +391,8 @@ def cited_sources(answer: str, sources: list) -> list:
     out = []
     for src in sources:
         s = str(src).strip()
-        if not s or s in out:
-            continue
+        if not s or s in out or (owner and s.lower() == owner.lower()):
+            continue   # the owner's name is in every answer; naming it says nothing
         if re.fullmatch(r"[LD]-\d{3}", s):
             if re.search(r"(?<![\w-])" + re.escape(s) + r"(?![\w-])", answer or ""):
                 out.append(s)
