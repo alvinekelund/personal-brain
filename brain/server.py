@@ -71,7 +71,7 @@ def api_node(conn, node_id):
                           "dir": "→" if e["source_id"] == node_id else "←"})
     return {"name": n["name"], "type": n["type"], "content": n["content"] or "",
             "importance": round(n["importance"], 2), "weight": round(n["weight"], 2),
-            "edges": edges}
+            "edges": edges, "path": _path(n)}
 
 
 def api_status(conn):
@@ -201,7 +201,7 @@ async function bDigest(){const j=await (await fetch('/digest')).json();
  if((j.areas||[]).length)h+='<br><br><b>By area</b><br>'+j.areas.map(a=>esc(a[0])+' ('+a[1]+')').join('<br>');
  show('Digest',h);}
 function showNode(j){ if(j.error){show('Node',j.error);return;}
- let b='importance '+j.importance+' · weight '+j.weight+'<br><br>'+esc(j.content)+'<br><br><b>connections</b><br>';
+ let b='importance '+j.importance+' · weight '+j.weight+(j.path?' · file '+esc(j.path):'')+'<br><br>'+esc(j.content)+'<br><br><b>connections</b><br>';
  b+=(j.edges||[]).map(e=>'• '+e.dir+' '+e.rel+' '+esc(e.other)).join('<br>')||'(none)';
  show(esc(j.name)+' ['+j.type+']', b); }
 window.brainNodeClick=async id=>{ if(!id)return; showNode(await (await fetch('/node?id='+encodeURIComponent(id))).json()); };

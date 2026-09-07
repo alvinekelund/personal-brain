@@ -904,6 +904,7 @@ class ServerApiTests(BrainTestCase):
     def test_api_node(self):
         from brain import server
         a = db.add_node(self.conn, "Football", type_="concept", content="a sport", importance=0.6)
+        self.conn.execute("UPDATE nodes SET path = 'topics/football.md' WHERE id = ?", (a,))
         b = db.add_node(self.conn, "Bjorn", type_="person")
         db.add_edge(self.conn, b, a, "relates_to")
         self.conn.commit()
@@ -912,6 +913,7 @@ class ServerApiTests(BrainTestCase):
         self.assertEqual(out["importance"], 0.6)
         self.assertEqual(out["content"], "a sport")
         self.assertTrue(any(e["other"] == "Bjorn" for e in out["edges"]))
+        self.assertEqual(out["path"], "topics/football.md")                 # the file behind the node
         self.assertEqual(server.api_node(self.conn, "nope"), {"error": "not found"})
 
     def test_api_tree(self):
