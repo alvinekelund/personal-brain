@@ -173,6 +173,21 @@ class ToolCallTests(MCPTestCase):
         result = call_tool("brain_remember", {"text": "I started learning Rust"})
         self.assertIn("brain setup", _json.dumps(result, ensure_ascii=False))
 
+    def test_search_ranks_files_with_the_same_query_vector(self):
+        """brain_search embedded the query for the nodes and then ranked the
+        vault files by keywords only; the CLI already passed the vector on."""
+        import brain.index as index
+        seen = {}
+        orig_search, orig_have, orig_embed = index.search, llm.have_key, llm.embed
+        index.search = lambda conn, q, **kw: (seen.update(kw), [])[1]
+        llm.have_key = lambda: True
+        llm.embed = lambda *a, **k: [0.3, 0.4]
+        try:
+            call_tool("brain_search", {"query": "anything"})
+        finally:
+            index.search, llm.have_key, llm.embed = orig_search, orig_have, orig_embed
+        self.assertEqual(seen.get("query_vector"), [0.3, 0.4])
+
     def test_remember_without_a_source_records_when_it_arrived(self):
         llm.generate = lambda *a, **k: json.dumps({
             "nodes": [{"name": "Go", "type": "skill", "content": "Learning Go.", "confidence": 0.9, "importance": 0.5}],

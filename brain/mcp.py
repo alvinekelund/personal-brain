@@ -171,13 +171,14 @@ def _search(conn, args):
         raise ValueError("'query' is required and must be non-empty.")
     limit = int(args.get("limit") or 8)
 
-    results = []
+    results, qvec = [], None
     if llm.have_key():  # meaning-based first; any failure falls through to keyword
         try:
-            scored = graph.semantic_search(conn, llm.embed(query), limit=limit)
+            qvec = llm.embed(query)
+            scored = graph.semantic_search(conn, qvec, limit=limit)
             results = [r for score, r in scored if score >= graph.SEMANTIC_SEED_MIN_SIM]
         except Exception:
-            results = []
+            results, qvec = [], None
     if not results:
         results = graph.query_nodes(conn, query)[:limit]
     else:
@@ -186,7 +187,8 @@ def _search(conn, args):
         conn.commit()
 
     from brain import index
-    files = index.search(conn, query, k=min(limit, 6), seed_node_ids=[r["id"] for r in results])
+    # the query vector ranks the files too (D-014): a file that says it in other words still surfaces
+    files = index.search(conn, query, k=min(limit, 6), seed_node_ids=[r["id"] for r in results], query_vector=qvec)
     if not results and not files:
         return f"No memories match '{query}'."
     out = "\n".join(_fmt_node(r) for r in results)
