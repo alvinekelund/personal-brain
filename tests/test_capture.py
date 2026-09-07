@@ -90,6 +90,13 @@ class DistillPromptTests(unittest.TestCase):
 
 
 class TranscriptParsingTests(CaptureTestCase):
+    def test_scheduled_task_wrapper_is_automation(self):
+        """Every scheduled run opens with the harness's <scheduled-task …> wrapper;
+        detection used to lean on the task's own prompt text, which can change."""
+        self.assertTrue(capture.is_automation('<scheduled-task name="nightly-brain-sync" file="…"> This is an automated run of a scheduled task.'))
+        self.assertTrue(capture.is_automation("This is an automated run of a scheduled task. Do the thing."))
+        self.assertFalse(capture.is_automation("I moved to Boston last week and want to remember my new address."))
+
     def test_collects_only_human_typed_text(self):
         t = transcript(self._tmp, [
             user_msg("I prefer functional style"),

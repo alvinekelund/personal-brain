@@ -40,8 +40,9 @@ STATE_MAX_AGE_DAYS = 45    # forget watermarks for sessions idle this long
 MAX_MESSAGE_AGE_H = 36     # older turns are a resumed stale thread, not today's truth — never re-mine them
 # Scheduled tasks and other automation run as sessions too; their "user" text is a prompt,
 # not the person talking. Any of these in a message marks the whole session as automation.
-AUTOMATION_MARKERS = ("---\nname:", "PushNotification", "You are running Alvin's", "Nightly sync of Alvin",
-                      "Morning phone brief", "<<autonomous-loop")
+AUTOMATION_MARKERS = ("<scheduled-task", "This is an automated run of a scheduled task",
+                      "---\nname:", "PushNotification", "You are running Alvin's", "Nightly sync of Alvin",
+                      "Morning phone brief", "<<autonomous-loop")   # the first two are the harness's own wrapper
 
 DISTILL_PROMPT = """Below are the messages a user typed to their coding assistant \
 during one session. Extract any DURABLE facts about the user worth keeping in \
