@@ -75,6 +75,8 @@ longer (and never auto-archive) while trivia decays on the base schedule.
 
 ## Install
 
+What changed and why, by day: [CHANGELOG.md](CHANGELOG.md).
+
 ```bash
 pip install -e .                    # installs dependencies from pyproject.toml
 export GEMINI_API_KEY=...           # or put it in ~/.personal-brain/.env
