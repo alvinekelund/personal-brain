@@ -304,6 +304,34 @@ def capture_tally(log_path: Path, now: float | None = None, days: int = CAPTURE_
 
 
 BRIEF_MAX_AGE_H = 30   # the morning brief runs daily; older than this and it did not run or did not record
+PUSH_MAX_AGE_H = 30    # the morning brief pushes daily; silence beyond a day and a bit is a broken channel
+
+
+def check_push(log_path: Path = DATA_DIR / "push.log", now: float | None = None) -> Check:
+    """The phone channel (`brain push`: an iMessage to Alvin's own number via
+    Messages.app): did the last push go through, and when? push.log is its trace."""
+    now = now or time.time()
+    try:
+        lines = [l for l in Path(log_path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    except FileNotFoundError:
+        return Check("push", "warn", "no push.log yet — `brain push --set-to <your number>` then `brain push --brief`")
+    except OSError as e:
+        return Check("push", "warn", f"cannot read {log_path}: {e}")
+    if not lines:
+        return Check("push", "warn", "push.log is empty — `brain push --brief`")
+    last = lines[-1]
+    try:
+        stamp = time.mktime(time.strptime(last[:19], "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        return Check("push", "warn", f"unreadable push.log line: {last[:80]}")
+    age_h = (now - stamp) / 3600
+    rest = last[20:]
+    if rest.startswith("FAILED"):
+        return Check("push", "fail", f"last push failed {age_h:.0f}h ago: {rest[:110]}")
+    if age_h > PUSH_MAX_AGE_H:
+        return Check("push", "warn", f"last push {age_h:.0f}h ago — the morning brief did not push")
+    return Check("push", "ok", f"last push {age_h:.0f}h ago: {rest[:90]}")
+
 
 
 def check_brief(log_path: Path = DATA_DIR / "brief.log", now: float | None = None) -> Check:
@@ -502,7 +530,8 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         capture_log: Path | None = DATA_DIR / "capture.log",
         brief_log: Path | None = DATA_DIR / "brief.log",
         backups_dir: Path | None = DATA_DIR / "backups",
-        probe_cache: Path | None = DATA_DIR / "api-probe.json") -> list[Check]:
+        probe_cache: Path | None = DATA_DIR / "api-probe.json",
+        push_log: Path | None = DATA_DIR / "push.log") -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
               check_claims(db_path, now, root=root), check_key(), check_api(api_probe, cache=probe_cache, now=now)]
     if backups_dir is not None:
@@ -512,6 +541,8 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         checks.append(check_capture(capture_log, now))
     if brief_log is not None:
         checks.append(check_brief(brief_log, now))
+    if push_log is not None:
+        checks.append(check_push(push_log, now))
     checks += check_vault(root, today, now)
     checks.append(check_index(db_path, root))
     checks += check_wiring(settings, claude_json, tasks_dir)

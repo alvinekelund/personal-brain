@@ -771,6 +771,43 @@ def backup(label, keep):
     click.echo(f"Backed up to {dest} ({size:.1f} MB)" + (f"; pruned {pruned} older" if pruned else ""))
 
 
+@cli.command()
+@click.argument("text", required=False, default="")
+@click.option("--brief", is_flag=True, help="send today's one-line brief (the same line as `brain today --brief`)")
+@click.option("--to", "to", default="", help="recipient for this send only (phone number or Apple ID email)")
+@click.option("--set-to", "set_to", default="", help="store the recipient (your own number) for every future push")
+def push(text, brief, to, set_to):
+    """Send an iMessage to yourself through this Mac's Messages app — the phone
+    channel for the morning brief and urgent notices. Every attempt is logged in
+    ~/.personal-brain/push.log; `brain doctor` reads it."""
+    from datetime import date as _date
+    from brain import push as push_mod
+    if set_to:
+        try:
+            click.echo(f"Pushes go to {push_mod.set_handle(set_to)}.")
+        except ValueError as e:
+            click.echo(str(e), err=True)
+            sys.exit(1)
+        if not (text or brief):
+            return
+    if brief:
+        root = config.vault_dir()
+        text = loops.brief(root, _date.today())
+        try:                                   # the same trace `brain today --brief` leaves
+            with open(doctor_mod.DATA_DIR / "brief.log", "a", encoding="utf-8") as f:
+                f.write(f"{_dt.now():%Y-%m-%d %H:%M:%S} {text}\n")
+        except OSError:
+            pass
+    if not text.strip():
+        click.echo("Nothing to send: give a message or --brief.", err=True)
+        sys.exit(1)
+    err = push_mod.send(text, to=to)
+    if err:
+        click.echo(f"Not sent: {err}", err=True)
+        sys.exit(1)
+    click.echo(f"Sent to {to or push_mod.handle()}: {' '.join(text.split())[:120]}")
+
+
 @cli.command("export")
 @click.argument("path", required=False, default="brain-export.json")
 @click.option("--lean", is_flag=True, help="leave the embeddings out (a restore then needs `brain reindex`)")

@@ -37,6 +37,14 @@ class CliTests(BrainTestCase):
         db.add_edge(self.conn, self.padel, self.knowledge, "part_of")
         self.conn.commit()
         self.runner = CliRunner()
+        import brain.push as _push                      # no test may reach Messages.app (one did on Sep 8 2026)
+        self._orig_push_runner = _push.RUNNER
+        _push.RUNNER = lambda *a, **k: (_ for _ in ()).throw(AssertionError("real iMessage send attempted in a test"))
+
+    def tearDown(self):
+        import brain.push as _push
+        _push.RUNNER = self._orig_push_runner
+        super().tearDown()
 
     def run_cli(self, *args):
         return self.runner.invoke(brain_cli.cli, list(args), catch_exceptions=False)
@@ -274,6 +282,35 @@ class CliTests(BrainTestCase):
             self.assertEqual(len(list((doctor.DATA_DIR / "backups").glob("brain-*.db"))), 2)   # stale: another
         finally:
             doctor.DATA_DIR = orig
+
+    def test_push_sets_the_handle_and_sends_via_the_fake_runner(self):
+        import tempfile
+        import brain.push as push_mod
+        import brain.doctor as doctor
+        orig_run, orig_log, orig_dir = push_mod.RUNNER, push_mod.LOG_PATH, doctor.DATA_DIR
+        calls = []
+
+        class R:
+            returncode, stdout, stderr = 0, "sent", ""
+        push_mod.RUNNER = lambda args, **kw: calls.append(args) or R()
+        push_mod.LOG_PATH = Path(tempfile.mkdtemp()) / "push.log"
+        doctor.DATA_DIR = Path(tempfile.mkdtemp())
+        try:
+            r = self.run_cli("push", "hello")
+            self.assertEqual(r.exit_code, 1)
+            self.assertIn("--set-to", r.output)
+            r = self.run_cli("push", "--set-to", "+13392221646")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertEqual(config.load()["push_to"], "+13392221646")
+            r = self.run_cli("push", "hello there")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertEqual(calls[-1][-2:], ["+13392221646", "hello there"])
+            r = self.run_cli("push", "--brief")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertTrue((doctor.DATA_DIR / "brief.log").read_text().strip())   # the brief trace, as with today --brief
+            self.assertEqual(len(calls), 2)
+        finally:
+            push_mod.RUNNER, push_mod.LOG_PATH, doctor.DATA_DIR = orig_run, orig_log, orig_dir
 
     def test_backup_snapshots_and_prunes(self):
         import sqlite3, tempfile

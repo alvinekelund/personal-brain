@@ -48,6 +48,8 @@ Nothing ingests before `brain setup` names the owner — `brain add`, the MCP to
 
 **Ambient capture (Claude Code hook)** — `integrations/claude_code_capture.py` wires into Claude Code as a SessionEnd hook: when a session ends, it distills durable facts from what *you* typed (never tool output, never assistant text) and ingests them — so memory accumulates without ever saying "remember this". Capture is summary-level and auditable (`~/.personal-brain/capture.log`), trivial sessions are skipped, and secrets are excluded by construction and by prompt. Each session carries an ingest watermark (`capture-state.json`), so a long-lived session that ends repeatedly only ever mines the turns typed since its last capture — never the whole transcript again.
 
+**The phone channel is an iMessage to yourself** — `brain push` hands a line to this Mac's Messages.app, which sends it to your own number (set once with `--set-to`); `--brief` sends the same line as `brain today --brief`. The morning brief and the scheduled tasks' urgent notices use it, every attempt lands in `~/.personal-brain/push.log`, and `brain doctor` warns when a day passes without a push or the last one failed. The Claude app's push notification stays as the fallback: it reaches the phone only while Remote Control is connected and leaves no trace.
+
 **The vault stays committed** — every write the CLI or extractor makes to the vault commits itself: loop/decision edits commit as before, and an ingest commits its own generated output (`DIGEST.md`, `graph/`, `LOOPS-INBOX.md`) in a scoped commit that never sweeps up curated files you're mid-editing; the curation commands (`merge`, `move`, `rename`, `retype`, `describe`, `forget`, `reinforce`, `subgroup`, `reorganize`, `repair`) re-render and commit the views the same way. `brain doctor`'s vault-git check can therefore stay strict: dirt means a human left something uncommitted, not that the extractor ran.
 
 ---
@@ -194,6 +196,7 @@ brain subgroup [--threshold N]   # split oversized categories into LLM-clustered
 
 # Backup / portability
 brain backup [--label X] [--keep N]   # consistent brain.db snapshot into ~/.personal-brain/backups/ (SQLite backup API), pruned to N; `brain today` takes one itself when the newest is over 7 days old
+brain push [TEXT] [--brief] [--set-to N]     # iMessage to your own number via Messages.app (the morning brief + urgent notices); logged in push.log
 brain export backup.json         # dump the whole graph to JSON, embeddings included (--lean to leave them out)
 brain import backup.json         # merge a JSON export back in (skips duplicates)
 ```

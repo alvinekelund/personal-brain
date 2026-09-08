@@ -60,6 +60,8 @@ class DoctorTests(unittest.TestCase):
         self.backups = self.tmp / "backups"
         self.backups.mkdir()
         (self.backups / "brain-2026-09-01-080000.db").write_bytes(b"x")
+        self.push_log = self.tmp / "push.log"
+        self.push_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " sent → +13392221646: Seat lock in 3d\n")
         self.brief_log = self.tmp / "brief.log"
         self.brief_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " Seat lock in 3d: enroll 9.522\n")
         self.tasks = self.tmp / "scheduled-tasks"
@@ -79,7 +81,7 @@ class DoctorTests(unittest.TestCase):
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
                     settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
                     api_probe=reachable, capture_log=self.capture_log, brief_log=self.brief_log,
-                    backups_dir=self.backups, probe_cache=None)
+                    backups_dir=self.backups, probe_cache=None, push_log=self.push_log)
         args.update(kw)
         return doctor.run(**args)
 
@@ -90,7 +92,7 @@ class DoctorTests(unittest.TestCase):
         decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
         now.write(self.root)                      # NOW.md becomes generated → the now.md check applies
         checks = by_name(self.run_doctor())
-        for name in ("binary", "graph", "graph-tree", "claims", "backups", "gemini-key", "gemini-api", "capture", "brief", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
+        for name in ("binary", "graph", "graph-tree", "claims", "backups", "gemini-key", "gemini-api", "capture", "brief", "push", "vault-activity", "now.md", "loops", "decisions", "hooks", "mcp", "scheduled-tasks"):
             self.assertEqual(checks[name].status, "ok", f"{name}: {checks[name].detail}")
         self.assertEqual(checks["vault-git"].status, "warn")   # not a git repo — a warning, not a failure
         self.assertEqual(doctor.worst(list(checks.values())), "warn")
@@ -252,6 +254,21 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(by_name(self.run_doctor())["capture"].status, "fail")
         self.capture_log.unlink()
         self.assertEqual(by_name(self.run_doctor())["capture"].status, "warn")
+
+    def test_push_check_reads_the_channel_log(self):
+        c = by_name(self.run_doctor())["push"]
+        self.assertEqual(c.status, "ok", c.detail)
+        self.assertIn("Seat lock in 3d", c.detail)
+        old = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 40 * 3600))
+        self.push_log.write_text(old + " sent → +13392221646: x\n")
+        self.assertEqual(by_name(self.run_doctor())["push"].status, "warn")
+        self.push_log.write_text(time.strftime("%Y-%m-%d %H:%M:%S") + " FAILED (Messages got an error: not signed in) → +13392221646: x\n")
+        c = by_name(self.run_doctor())["push"]
+        self.assertEqual(c.status, "fail")
+        self.assertIn("not signed in", c.detail)
+        self.push_log.unlink()
+        self.assertIn("--set-to", by_name(self.run_doctor())["push"].detail)
+        self.assertNotIn("push", by_name(self.run_doctor(push_log=None)))
 
     def test_backups_check_wants_a_recent_snapshot(self):
         self.assertEqual(by_name(self.run_doctor())["backups"].status, "ok")      # fixture: a fresh file
