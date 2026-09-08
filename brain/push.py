@@ -2,8 +2,11 @@
 
 The Claude app's push notification reaches the phone only while Remote
 Control is connected and leaves no trace; an iMessage sent from this Mac's
-Messages.app to Alvin's own number lands on the iPhone like any text and is
-logged here. Nothing in this module talks to the network: Messages.app does.
+Messages.app to Alvin's own Apple ID handle lands on the iPhone like any text
+and is logged here. The script names the iMessage account explicitly and the
+handle is an email, so nothing can fall back to SMS (no carrier charges; the
+US number was "Not Delivered" anyway). Nothing here talks to the network:
+Messages.app does.
 """
 from __future__ import annotations
 
