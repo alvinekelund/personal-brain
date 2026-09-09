@@ -578,7 +578,10 @@ def search(conn, query: str, k: int = 6, seed_node_ids: list[str] | None = None,
                                "score": round(score, 3), "why": why, "updated": r["updated"] or ""}
 
     def order(h):
-        return (-h["score"], KIND_PRIORITY.get(h["kind"], 20), h["updated"] and -int(h["updated"].replace("-", "")[:8] or 0), h["path"])
+        # a file with no `updated:` still has to sort against ones that have it, so the
+        # stamp slot is always an int: dated files first (negative), undated after (0)
+        stamp = h["updated"].replace("-", "")[:8] if h["updated"] else ""
+        return (-h["score"], KIND_PRIORITY.get(h["kind"], 20), -int(stamp) if stamp.isdigit() else 0, h["path"])
 
     top = sorted(hits.values(), key=order)
     # one hop of file links from the best hits: related files the reader would follow
