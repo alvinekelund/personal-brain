@@ -775,11 +775,15 @@ def backup(label, keep):
 @click.argument("text", required=False, default="")
 @click.option("--brief", is_flag=True, help="send today's one-line brief (the same line as `brain today --brief`)")
 @click.option("--to", "to", default="", help="recipient for this send only (phone number or Apple ID email)")
-@click.option("--set-to", "set_to", default="", help="store the recipient (your own number) for every future push")
-def push(text, brief, to, set_to):
-    """Send an iMessage to yourself through this Mac's Messages app — the phone
-    channel for the morning brief and urgent notices. Every attempt is logged in
-    ~/.personal-brain/push.log; `brain doctor` reads it."""
+@click.option("--set-to", "set_to", default="", help="store the iMessage recipient (your Apple ID handle) for every future push")
+@click.option("--set-email", "set_email", default="", help="store an email address that gets a copy of every push ('off' to stop)")
+@click.option("--from", "email_from", default="", help="with --set-email: the Mail.app account address to send from")
+@click.option("--no-email", is_flag=True, help="this push: iMessage only, skip the email copy")
+def push(text, brief, to, set_to, set_email, email_from, no_email):
+    """Send yourself a note: an iMessage through this Mac's Messages app and, if
+    configured, an email copy through Mail.app — the channel for the morning
+    brief and urgent notices. Every attempt is logged in ~/.personal-brain/push.log;
+    `brain doctor` reads it."""
     from datetime import date as _date
     from brain import push as push_mod
     if set_to:
@@ -788,8 +792,18 @@ def push(text, brief, to, set_to):
         except ValueError as e:
             click.echo(str(e), err=True)
             sys.exit(1)
-        if not (text or brief):
-            return
+    if set_email:
+        if set_email.lower() == "off":
+            push_mod.clear_email()
+            click.echo("Email copy off.")
+        else:
+            try:
+                click.echo(f"Email copy goes to {push_mod.set_email(set_email, email_from)}.")
+            except ValueError as e:
+                click.echo(str(e), err=True)
+                sys.exit(1)
+    if (set_to or set_email) and not (text or brief):
+        return
     if brief:
         root = config.vault_dir()
         text = loops.brief(root, _date.today())
@@ -804,8 +818,19 @@ def push(text, brief, to, set_to):
     err = push_mod.send(text, to=to)
     if err:
         click.echo(f"Not sent: {err}", err=True)
+    else:
+        click.echo(f"Sent to {to or push_mod.handle()}: {' '.join(text.split())[:120]}")
+    mail_err = None
+    if push_mod.email_handle() and not no_email and not to:
+        mail_err = push_mod.send_email(text)
+        if mail_err:
+            click.echo(f"Email copy not sent: {mail_err}", err=True)
+        else:
+            click.echo(f"Email copy sent to {push_mod.email_handle()}.")
+    if err and mail_err is not None and mail_err:
         sys.exit(1)
-    click.echo(f"Sent to {to or push_mod.handle()}: {' '.join(text.split())[:120]}")
+    if err and mail_err is None and not push_mod.email_handle():
+        sys.exit(1)
 
 
 @cli.command("export")

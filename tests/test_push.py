@@ -62,6 +62,25 @@ class PushTests(unittest.TestCase):
         push.send("y" * 2000, runner=run, log_path=self.log)
         self.assertLessEqual(len(run.calls[0][-1]), push.MAX_CHARS)
 
+    def test_email_copy_goes_through_mail_app_with_argv(self):
+        run = FakeRun()
+        self.assertIn("--set-email", push.send_email("hi", runner=run, log_path=self.log))
+        push.set_email("alvine@mail.instinct.com", sender="ALVIN.EKELUND@gmail.com")
+        self.assertIsNone(push.send_email("Seat lock in 3d. Enroll 9.522.", runner=run, log_path=self.log))
+        args = run.calls[0]
+        self.assertEqual(args[0], "osascript")
+        self.assertIn('tell application "Mail"', " ".join(args))
+        self.assertEqual(args[-4:], ["alvine@mail.instinct.com", "brain: Seat lock in 3d. Enroll 9.522.",
+                                     "Seat lock in 3d. Enroll 9.522.", "ALVIN.EKELUND@gmail.com"])
+        self.assertIn("sent → email alvine@mail.instinct.com: Seat lock in 3d", self.log.read_text())
+        err = push.send_email("x", runner=FakeRun(rc=1, out="", err="Mail got an error: no account"), log_path=self.log)
+        self.assertIn("no account", err)
+        self.assertIn("FAILED (Mail got an error", self.log.read_text())
+        push.clear_email()
+        self.assertEqual(push.email_handle(), "")
+        with self.assertRaises(ValueError):
+            push.set_email("not-an-address")
+
 
 if __name__ == "__main__":
     unittest.main()

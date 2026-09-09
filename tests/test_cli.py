@@ -309,6 +309,17 @@ class CliTests(BrainTestCase):
             self.assertEqual(r.exit_code, 0, r.output)
             self.assertTrue((doctor.DATA_DIR / "brief.log").read_text().strip())   # the brief trace, as with today --brief
             self.assertEqual(len(calls), 2)
+            r = self.run_cli("push", "--set-email", "alvine@mail.instinct.com", "--from", "ALVIN.EKELUND@gmail.com")
+            self.assertEqual(r.exit_code, 0, r.output)
+            r = self.run_cli("push", "both channels")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertIn("Email copy sent to alvine@mail.instinct.com", r.output)
+            self.assertEqual(len(calls), 4)                                        # iMessage + Mail.app
+            self.assertIn('tell application "Mail"', " ".join(calls[-1]))
+            r = self.run_cli("push", "--no-email", "phone only")
+            self.assertEqual(len(calls), 5)
+            r = self.run_cli("push", "--set-email", "off")
+            self.assertEqual(config.load().get("push_email"), None)
         finally:
             push_mod.RUNNER, push_mod.LOG_PATH, doctor.DATA_DIR = orig_run, orig_log, orig_dir
 

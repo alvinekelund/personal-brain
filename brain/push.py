@@ -18,6 +18,9 @@ from brain import DATA_DIR, config
 
 LOG_PATH = DATA_DIR / "push.log"
 CONFIG_KEY = "push_to"          # the iMessage handle (phone number or Apple ID email)
+EMAIL_KEY = "push_email"        # optional: an email copy of every push (Alvin's Instinct address), via Mail.app
+EMAIL_FROM_KEY = "push_email_from"   # the Mail.app account address to send from (default: the first account)
+SUBJECT_MAX = 60
 MAX_CHARS = 1000                # iMessage carries more, but a push should stay a note
 TIMEOUT = 25.0
 RUNNER = subprocess.run   # looked up at call time, so tests can replace it and never reach Messages.app
@@ -34,6 +37,73 @@ _SCRIPT = [
     'return "sent"',
     "end run",
 ]
+
+
+_MAIL_SCRIPT = [
+    "on run argv",
+    "set a to item 1 of argv",
+    "set s to item 2 of argv",
+    "set t to item 3 of argv",
+    "set f to item 4 of argv",
+    'tell application "Mail"',
+    "set m to make new outgoing message with properties {subject:s, content:t, visible:false}",
+    "if f is not \"\" then set sender of m to f",
+    "tell m to make new to recipient with properties {address:a}",
+    "send m",
+    "end tell",
+    'return "sent"',
+    "end run",
+]
+
+
+def email_handle() -> str:
+    """The optional email copy's recipient — set with `brain push --set-email`."""
+    return (config.load().get(EMAIL_KEY) or "").strip()
+
+
+def set_email(value: str, sender: str = "") -> str:
+    value = (value or "").strip()
+    if not value or "@" not in value:
+        raise ValueError("an email address is needed (or 'off' to stop the email copy)")
+    cfg = config.load()
+    cfg[EMAIL_KEY] = value
+    if sender.strip():
+        cfg[EMAIL_FROM_KEY] = sender.strip()
+    config.save(cfg)
+    return value
+
+
+def clear_email():
+    cfg = config.load()
+    cfg.pop(EMAIL_KEY, None)
+    config.save(cfg)
+
+
+def send_email(text: str, to: str = "", runner=None, log_path: Path | None = None) -> str | None:
+    """Email `text` to `to` (default: the configured email copy) through this
+    Mac's Mail.app, from the configured account (or Mail's default). Free, no
+    credentials in the brain. Returns None on success, else the reason; logged."""
+    runner = runner or RUNNER
+    log_path = log_path or LOG_PATH
+    text = (text or "").strip()
+    to = (to or email_handle()).strip()
+    if not text:
+        return "nothing to send"
+    if not to:
+        return "no email recipient: `brain push --set-email <address>`"
+    subject = "brain: " + " ".join(text.split())[:SUBJECT_MAX]
+    sender = (config.load().get(EMAIL_FROM_KEY) or "").strip()
+    args = ["osascript"]
+    for line in _MAIL_SCRIPT:
+        args += ["-e", line]
+    args += ["--", to, subject, text, sender]
+    try:
+        r = runner(args, capture_output=True, text=True, timeout=TIMEOUT)
+        err = None if r.returncode == 0 and "sent" in (r.stdout or "") else (r.stderr or r.stdout or "osascript failed").strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        err = str(e)
+    _log(log_path, ("sent" if err is None else f"FAILED ({err[:120]})") + f" → email {to}: {' '.join(text.split())}")
+    return err
 
 
 def handle() -> str:
