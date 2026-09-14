@@ -2,6 +2,9 @@
 
 Newest first. One section per day of work; each bullet names what changed and why, with the commits that carry it (`git log 5af0c6c..7642567` lists all 125 of Sep 6).
 
+## 2026-09-14
+- llm: `GeminiUnavailable(RuntimeError)` names the over-budget and unreachable wraps in `generate`/`embed`; the capture hook defers on it instead of logging `error:` (the five identical failures of 7–12 Sep, W37 review).
+
 ## 2026-09-06 — 125 commits, 393 tests, CI green
 
 **Ingest and extraction**

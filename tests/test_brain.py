@@ -2459,6 +2459,8 @@ class LLMRetryTests(unittest.TestCase):
         self.assertIn("BRAIN_LLM_BUDGET", str(g.exception))
         self.assertIn("too slow", str(g.exception))
         self.assertIn("over budget", str(e.exception))
+        self.assertIsInstance(g.exception, llm.GeminiUnavailable)   # named, so the capture hook can defer on it
+        self.assertIsInstance(e.exception, llm.GeminiUnavailable)
 
     def test_generate_passes_its_budget_down(self):
         orig_req, orig_key = llm._request, os.environ.get("GEMINI_API_KEY")

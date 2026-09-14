@@ -309,6 +309,19 @@ class WatermarkTests(CaptureTestCase):
         self.assertIn("message number 0 ", joined)                                  # the head is not lost
         self.assertIn("message number 59", joined)
 
+    def test_wrapped_budget_error_is_deferred_too(self):
+        """What production actually raises: llm.generate wraps BudgetExceeded in
+        a RuntimeError with the BRAIN_LLM_BUDGET advice, which sailed past the
+        deferral clause five times between 7 and 12 Sep 2026."""
+        llm.have_key = lambda: True
+        llm.generate = lambda *a, **k: (_ for _ in ()).throw(llm.GeminiUnavailable(
+            "Gemini call over budget: gave up after attempt 1/3: a 2s timed out wait would exceed the 120s budget. Raise BRAIN_LLM_BUDGET (seconds) to allow longer waits."))
+        t = transcript(self._tmp, [user_msg("x" * 300)])
+        self.run_hook(t)
+        self.assertIn("deferred (GeminiUnavailable", self.log_text())
+        self.assertNotIn("error:", self.log_text())
+        self.assertEqual(capture.load_state(), {})
+
     def test_api_trouble_is_deferred_not_an_error(self):
         """With the Gemini endpoint degraded on Sep 6 2026 a distill would have
         raised BudgetExceeded and the doctor would have shown a red 'last run

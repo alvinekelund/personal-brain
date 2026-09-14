@@ -27,6 +27,14 @@ GENERATE_BUDGET = 120.0
 EMBED_BUDGET = 45.0
 
 
+class GeminiUnavailable(RuntimeError):
+    """The API could not be used inside the budget — over budget, unreachable,
+    connection dropped. A RuntimeError so existing callers keep working, but
+    named so the capture hook can defer instead of logging an error: five
+    'error: RuntimeError: Gemini call over budget' lines between 7 and 12 Sep
+    2026 were all this, wrapped past the hook's except clause."""
+
+
 class BudgetExceeded(OSError):
     """The call (attempts + waits) would outlive its wall-clock budget."""
 
@@ -183,9 +191,9 @@ def embed(text: str, model: str = EMBED_MODEL, timeout: float = 30.0,
             f"Gemini embeddings error {e.code}: {e.read().decode(errors='replace')[:300]}"
         ) from None
     except BudgetExceeded as e:
-        raise RuntimeError(f"Gemini embeddings call over budget: {e}") from None
+        raise GeminiUnavailable(f"Gemini embeddings call over budget: {e}") from None
     except OSError as e:
-        raise RuntimeError(f"Could not reach Gemini embeddings API: {e}") from None
+        raise GeminiUnavailable(f"Could not reach Gemini embeddings API: {e}") from None
     try:
         return data["embedding"]["values"]
     except (KeyError, TypeError):
@@ -266,11 +274,11 @@ def generate(
             )
         raise RuntimeError(f"Gemini API error {e.code}: {detail}{hint}") from None
     except BudgetExceeded as e:
-        raise RuntimeError(
+        raise GeminiUnavailable(
             f"Gemini call over budget: {e}. Raise BRAIN_LLM_BUDGET (seconds) to allow longer waits."
         ) from None
     except OSError as e:
-        raise RuntimeError(f"Could not reach Gemini API: {e}") from None
+        raise GeminiUnavailable(f"Could not reach Gemini API: {e}") from None
 
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"]
