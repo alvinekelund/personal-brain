@@ -255,6 +255,21 @@ def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None =
     if recent_err and recent_err[-1] == last:
         return Check("capture", "fail", f"last run failed: {last[20:140]}")
     if ": deferred (" in last:
+        # a run of deferrals is not weather any more: the API keeps timing out
+        # inside the budget, and only a bigger budget under a longer hook
+        # timeout fixes that (five in six days on 7-12 Sep 2026, W37 review)
+        streak = 0
+        for l in reversed(lines):
+            if ": skipped (" in l:
+                continue                      # a skip never reached the API
+            if ": deferred (" in l:
+                streak += 1
+                continue
+            break
+        if streak >= CAPTURE_DEFER_STREAK:
+            return Check("capture", "warn", f"{streak} capture runs in a row deferred — the API keeps timing out inside the "
+                         f"{int(llm._env_float('BRAIN_LLM_BUDGET', llm.GENERATE_BUDGET))}s budget: set BRAIN_LLM_BUDGET=150 on the "
+                         "SessionEnd hook command and its timeout to 300 in ~/.claude/settings.json (Alvin's call)")
         return Check("capture", "warn", f"last run deferred (API did not answer) — retried at the next session end: {last[20:120]}")
     tail = last[20:110] + capture_tally(Path(log_path), now)
     if age_h is not None and age_h > 72:
@@ -263,6 +278,7 @@ def check_capture(log_path: Path = DATA_DIR / "capture.log", now: float | None =
 
 
 CAPTURE_TALLY_DAYS = 7
+CAPTURE_DEFER_STREAK = 3   # consecutive deferrals (skips ignored) that stop being weather
 
 
 def capture_tally(log_path: Path, now: float | None = None, days: int = CAPTURE_TALLY_DAYS) -> str:

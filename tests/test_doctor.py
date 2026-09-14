@@ -309,6 +309,17 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(c.status, "warn")
         self.assertIn("retried at the next session end", c.detail)
 
+    def test_deferral_streak_names_the_budget_fix(self):
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        d = " session ab12: deferred (GeminiUnavailable: Gemini call over budget) — the API did not answer; the next capture retries\n"
+        self.capture_log.write_text((stamp + d) * 2 + stamp + " session ab13: skipped (automation session)\n" + stamp + d)
+        c = by_name(self.run_doctor())["capture"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("3 capture runs in a row deferred", c.detail)      # the skip in between does not break the streak
+        self.assertIn("BRAIN_LLM_BUDGET=150", c.detail)
+        self.capture_log.write_text(stamp + " session ab11: ingested 1 node(s)\n" + stamp + d + stamp + d)
+        self.assertIn("retried at the next session end", by_name(self.run_doctor())["capture"].detail)   # two: still weather
+
     def test_capture_line_tallies_the_week(self):
         """The weekly review counted '14 sessions ingested, 25 skipped' by hand
         from capture.log; the doctor line now carries the 7-day tally."""
