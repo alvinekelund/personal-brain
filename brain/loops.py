@@ -369,8 +369,11 @@ def done(root: Path, lid: str, note: str = "", today: date | None = None,
 
 
 def edit(root: Path, lid: str, today: date | None = None, commit: bool = True,
-         **changes) -> Loop:
-    """Update any of title/due/owner/area/prio/next/note on an open loop."""
+         touch: bool = True, touched=None, **changes) -> Loop:
+    """Update any of title/due/owner/area/prio/next/note on an open loop.
+    Bumps `touched` to today unless `touch=False` (a cosmetic rewrite — on
+    Sep 7 2026 a 34-loop next-action trim reset the card's staleness for a
+    third of the ledger) or `touched=<date>` sets it explicitly (a correction)."""
     today = today or date.today()
     ledger = load(root)
     loop = ledger.get(lid)
@@ -387,9 +390,13 @@ def edit(root: Path, lid: str, today: date | None = None, commit: bool = True,
         elif k == "next_":
             k = "next"
         clean[k] = v
-    if not clean:
+    if touched is not None:
+        clean["touched"] = _parse_date(touched, f"{lid} touched")
+    elif touch:
+        clean["touched"] = today
+    if not clean or set(clean) == {"touched"} and touched is None and not changes:
         raise LoopError("nothing to change")
-    updated = replace(loop, touched=today, **clean)
+    updated = replace(loop, **clean)
     validate(updated)
     ledger.open[ledger.open.index(loop)] = updated
     _finish(root, ledger, f"loop {lid}: edit {', '.join(clean)}", commit)

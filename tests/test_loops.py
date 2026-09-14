@@ -150,6 +150,21 @@ class OperationTests(LoopsTestCase):
         with self.assertRaises(loops.LoopError):
             loops.edit(self.root, "L-001", today=later, commit=False)
 
+    def test_edit_can_leave_touched_alone_or_set_it(self):
+        """On Sep 7 2026 a 34-loop next-action trim bumped `touched` on every
+        loop, so the card under-reported staleness by up to six days for a
+        third of the ledger (W37 review). A cosmetic edit keeps the stamp; a
+        correction sets it explicitly."""
+        self.add(title="Seat", due="2026-09-09", next_="enroll")
+        l = loops.edit(self.root, "L-001", today=date(2026, 9, 7), next_="enroll 9.522", touch=False, commit=False)
+        self.assertEqual(l.touched, TODAY)                                   # untouched by the trim
+        l = loops.edit(self.root, "L-001", today=date(2026, 9, 7), touched="2026-09-03", commit=False)
+        self.assertEqual(l.touched, date(2026, 9, 3))                         # explicit correction
+        l = loops.edit(self.root, "L-001", today=date(2026, 9, 7), next_="enroll now", commit=False)
+        self.assertEqual(l.touched, date(2026, 9, 7))                         # a real edit still touches
+        with self.assertRaises(loops.LoopError):
+            loops.edit(self.root, "L-001", touch=False, commit=False)         # nothing to change
+
     def test_touch_bumps_touched_only(self):
         """Regression: touch() routed through edit(touched=...), which sets
         `touched` itself, so replace() got the keyword twice and `brain loop

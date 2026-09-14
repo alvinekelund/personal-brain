@@ -973,11 +973,14 @@ def loop_done(lid, note, today, no_commit):
 @click.option("--prio", type=click.IntRange(1, 3))
 @click.option("--note")
 @click.option("--date", "today", default=None)
+@click.option("--no-touch", is_flag=True, help="a cosmetic edit: leave `touched` as it is")
+@click.option("--touched", "touched", default=None, help="set `touched` to this date (a correction), YYYY-MM-DD")
 @click.option("--no-commit", is_flag=True)
-def loop_edit(lid, title, due, next_, owner, area, prio, note, today, no_commit):
-    """Change fields on an open loop (also bumps `touched`)."""
+def loop_edit(lid, title, due, next_, owner, area, prio, note, today, no_touch, touched, no_commit):
+    """Change fields on an open loop (bumps `touched` unless --no-touch / --touched)."""
     try:
         l = loops.edit(_vault_root(), lid, today=_parse_day(today), commit=not no_commit,
+                       touch=not no_touch, touched=touched,
                        title=title, due=due, next_=next_, owner=owner, area=area, prio=prio, note=note)
     except loops.LoopError as e:
         _die(e)
