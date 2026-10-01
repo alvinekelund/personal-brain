@@ -31,6 +31,7 @@ EXPECTED_BIN = DATA_DIR / "venv" / "bin" / "brain"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 CLAUDE_JSON = Path.home() / ".claude.json"
 SCHEDULED_TASKS = Path.home() / ".claude" / "scheduled-tasks"
+APPS_RENDER = DATA_DIR / "apps" / "render.py"   # the app renderer (vault → app page data blocks), if installed
 # Only count a path as absolute when nothing word-like precedes it, so a relative
 # mention such as "areas/brain.md" is not read as the path "/brain.md".
 ABS_PATH_RE = re.compile(r"(?<![\w.~-])(~?/[\w./+-]+)")
@@ -374,6 +375,28 @@ def check_brief(log_path: Path = DATA_DIR / "brief.log", now: float | None = Non
     return Check("brief", "ok", f"last brief {age_h:.0f}h ago: {text}")
 
 
+def check_apps(script: Path = APPS_RENDER, python: str = sys.executable, timeout: float = 60) -> Check | None:
+    """The app renderer's drift lint (`render.py --lint`): does every published app page
+    still match what the vault would render? Apps hold no hand-kept data (D-014), so a
+    page that disagrees with the vault is stale, not a second truth. None when no
+    renderer is installed. Drift is a warning: deck-sync renders and publishes."""
+    script = Path(script)
+    if not script.is_file():
+        return None
+    try:
+        r = subprocess.run([python, str(script), "--lint", "--quiet"],
+                           capture_output=True, text=True, timeout=timeout)
+    except (subprocess.SubprocessError, OSError) as e:
+        return Check("apps", "warn", f"render.py --lint did not run: {e}")
+    lines = (r.stdout.strip() or r.stderr.strip()).splitlines()
+    msg = lines[-1] if lines else ""
+    if r.returncode == 0:
+        return Check("apps", "ok", msg or "published pages match the vault")
+    if r.returncode == 1:
+        return Check("apps", "warn", (msg or "drift")[:240] + " (deck-sync renders + publishes)")
+    return Check("apps", "warn", f"render.py --lint exit {r.returncode}: {msg[:200]}")
+
+
 def check_index(db_path: Path = DB_PATH, root: Path | None = None) -> Check:
     """Is the vault index current? (D-014: the directory is the brain; the graph
     routes questions to its files, so a stale index sends `brain ask` to old text.)"""
@@ -547,7 +570,8 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         brief_log: Path | None = DATA_DIR / "brief.log",
         backups_dir: Path | None = DATA_DIR / "backups",
         probe_cache: Path | None = DATA_DIR / "api-probe.json",
-        push_log: Path | None = DATA_DIR / "push.log") -> list[Check]:
+        push_log: Path | None = DATA_DIR / "push.log",
+        apps_render: Path | None = APPS_RENDER) -> list[Check]:
     checks = [check_binary(expected_bin), check_db(db_path, now), check_graph_integrity(db_path),
               check_claims(db_path, now, root=root), check_key(), check_api(api_probe, cache=probe_cache, now=now)]
     if backups_dir is not None:
@@ -561,6 +585,10 @@ def run(root: Path, today: date | None = None, now: float | None = None,
         checks.append(check_push(push_log, now))
     checks += check_vault(root, today, now)
     checks.append(check_index(db_path, root))
+    if apps_render is not None:
+        apps = check_apps(apps_render)
+        if apps is not None:
+            checks.append(apps)
     checks += check_wiring(settings, claude_json, tasks_dir)
     return checks
 

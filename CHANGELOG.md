@@ -2,6 +2,9 @@
 
 Newest first. One section per day of work; each bullet names what changed and why, with the commits that carry it (`git log 5af0c6c..7642567` lists all 125 of Sep 6).
 
+## 2026-10-01
+- doctor: new `apps` check runs the app renderer's drift lint (`~/.personal-brain/apps/render.py --lint --quiet`, when installed): ok when every published app page matches what the vault would render, a warning naming the drifting app otherwise. The apps now render from the vault (D-014), so a page that disagrees with it is stale, not a second truth. `run(apps_render=None)` skips it in tests.
+
 ## 2026-09-14
 - llm: `GeminiUnavailable(RuntimeError)` names the over-budget and unreachable wraps in `generate`/`embed`; the capture hook defers on it instead of logging `error:` (the five identical failures of 7–12 Sep, W37 review).
 

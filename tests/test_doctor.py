@@ -81,7 +81,8 @@ class DoctorTests(unittest.TestCase):
         args = dict(root=self.root, today=TODAY, db_path=self.db, expected_bin=self.bin,
                     settings=self.settings, claude_json=self.claude_json, tasks_dir=self.tasks,
                     api_probe=reachable, capture_log=self.capture_log, brief_log=self.brief_log,
-                    backups_dir=self.backups, probe_cache=None, push_log=self.push_log)
+                    backups_dir=self.backups, probe_cache=None, push_log=self.push_log,
+                    apps_render=None)
         args.update(kw)
         return doctor.run(**args)
 
@@ -351,6 +352,31 @@ class DoctorTests(unittest.TestCase):
         c = by_name(self.run_doctor())["graph-tree"]
         self.assertEqual(c.status, "warn")
         self.assertIn("1 cross-link(s) to a category (brain repair)", c.detail)
+
+    def _fake_render(self, code: int, out: str) -> Path:
+        script = self.tmp / "render.py"
+        script.write_text(f"import sys\nprint({out!r})\nsys.exit({code})\n")
+        return script
+
+    def test_apps_check_absent_without_renderer(self):
+        self.assertNotIn("apps", by_name(self.run_doctor(apps_render=self.tmp / "nope.py")))
+        self.assertIsNone(doctor.check_apps(self.tmp / "nope.py"))
+
+    def test_apps_in_sync(self):
+        c = by_name(self.run_doctor(apps_render=self._fake_render(0, "apps: 5 in sync with the vault")))["apps"]
+        self.assertEqual(c.status, "ok")
+        self.assertIn("5 in sync", c.detail)
+
+    def test_apps_drift_is_a_warning(self):
+        c = doctor.check_apps(self._fake_render(1, "apps drift: deck: vault ahead of page source (run render.py)"))
+        self.assertEqual(c.status, "warn")
+        self.assertIn("deck: vault ahead", c.detail)
+        self.assertIn("deck-sync", c.detail)
+
+    def test_apps_broken_renderer_is_a_warning(self):
+        c = doctor.check_apps(self._fake_render(2, "render: LOOPS.md has errors"))
+        self.assertEqual(c.status, "warn")
+        self.assertIn("exit 2", c.detail)
 
     def test_unregistered_mcp_is_a_warning(self):
         self.claude_json.write_text(json.dumps({"mcpServers": {}}))
