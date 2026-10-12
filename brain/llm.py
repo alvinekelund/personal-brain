@@ -5,6 +5,7 @@ talk to the generativelanguage REST API directly. Only the standard library is u
 """
 import json
 import os
+import socket
 import ssl
 import time
 import urllib.error
@@ -25,6 +26,26 @@ RATE_LIMIT_MAX_WAIT = 65.0  # cap on a server-suggested retryDelay
 # with BRAIN_LLM_BUDGET / BRAIN_EMBED_BUDGET (seconds).
 GENERATE_BUDGET = 120.0
 EMBED_BUDGET = 45.0
+
+
+def prefer_ipv4() -> None:
+    """Resolve IPv4 addresses first, IPv6 after (Oct 12 2026). On Harvard Wi-Fi, IPv6 to Google's API is
+    silently dropped while IPv4 answers in 0.2 s; urllib tries addresses in getaddrinfo order (IPv6 first
+    there) and waits out the whole timeout before trying the next, so every embed and ingest call ran out of
+    budget ("connection dropped") and the doctor reported a slow network. curl and Node fall back to IPv4 at
+    once (happy eyeballs); urllib does not. IPv6 stays as the fallback. BRAIN_IPV6_FIRST=1 keeps the system order."""
+    if os.environ.get("BRAIN_IPV6_FIRST") == "1" or getattr(socket.getaddrinfo, "_brain_ipv4_first", False):
+        return
+    system = socket.getaddrinfo
+
+    def ipv4_first(*args, **kwargs):
+        return sorted(system(*args, **kwargs), key=lambda r: r[0] != socket.AF_INET)
+
+    ipv4_first._brain_ipv4_first = True
+    socket.getaddrinfo = ipv4_first
+
+
+prefer_ipv4()
 
 
 class GeminiUnavailable(RuntimeError):
