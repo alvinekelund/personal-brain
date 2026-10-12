@@ -179,10 +179,17 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(checks["loops"].status, "warn")
         self.assertEqual(checks["decisions"].status, "warn")
 
-    def test_lint_errors_fail(self):
+    def test_stale_now_md_warns_and_ledger_errors_fail(self):
+        """A NOW.md behind its sources is a stale view (re-render fixes it), not a broken brain: as a fail it
+        pushed "BRAIN BROKEN" to the phone (Oct 12 2026). A real ledger error still fails."""
         loops.add(self.root, "A", "2026-09-09", "alvin", "jobs", "n", today=TODAY, commit=False)
         (self.root / "NOW.md").write_text(NOW_MD)   # hand-edit the rendered block
-        self.assertEqual(by_name(self.run_doctor())["loops"].status, "fail")
+        c = by_name(self.run_doctor())["loops"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("NOW.md", c.detail)
+        p = self.root / "LOOPS.md"
+        p.write_text(p.read_text() + "- [ ] L-001 · dup · due 2026-09-09 · owner alvin · area jobs · next: n\n")
+        self.assertEqual(by_name(self.run_doctor())["loops"].status, "fail")   # duplicate id: the ledger is wrong
 
     def test_missing_db(self):
         self.assertEqual(by_name(self.run_doctor(db_path=self.tmp / "nope.db"))["graph"].status, "fail")

@@ -798,7 +798,8 @@ def backup(label, keep):
 @click.option("--set-email", "set_email", default="", help="store an email address that gets a copy of every push ('off' to stop)")
 @click.option("--from", "email_from", default="", help="with --set-email: the Mail.app account address to send from")
 @click.option("--no-email", is_flag=True, help="this push: iMessage only, skip the email copy")
-def push(text, brief, to, set_to, set_email, email_from, no_email):
+@click.option("--force", is_flag=True, help="send even when the identical note went out in the last 6 hours")
+def push(text, brief, to, set_to, set_email, email_from, no_email, force):
     """Send yourself a note: an iMessage through this Mac's Messages app and, if
     configured, an email copy through Mail.app — the channel for the morning
     brief and urgent notices. Every attempt is logged in ~/.personal-brain/push.log;
@@ -834,7 +835,12 @@ def push(text, brief, to, set_to, set_email, email_from, no_email):
     if not text.strip():
         click.echo("Nothing to send: give a message or --brief.", err=True)
         sys.exit(1)
-    err = push_mod.send(text, to=to)
+    if not force:
+        dup = push_mod.recent_duplicate(text, to=to)
+        if dup:
+            click.echo(f"Already sent at {dup[11:16]}; not repeated (--force sends it again).")
+            return
+    err = push_mod.send(text, to=to, dedupe_hours=0 if force else None)
     if err:
         click.echo(f"Not sent: {err}", err=True)
     else:

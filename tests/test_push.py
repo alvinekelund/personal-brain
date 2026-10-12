@@ -62,6 +62,21 @@ class PushTests(unittest.TestCase):
         push.send("y" * 2000, runner=run, log_path=self.log)
         self.assertLessEqual(len(run.calls[0][-1]), push.MAX_CHARS)
 
+    def test_identical_note_within_six_hours_is_not_sent_twice(self):
+        """Oct 12 2026: one "run stopped" alert reached the phone twice, 66 minutes apart."""
+        push.set_handle("+13392221646")
+        run = FakeRun()
+        self.assertIsNone(push.send("X4 run stopped (line 17)", runner=run, log_path=self.log))
+        self.assertIsNone(push.send("X4 run  stopped (line 17)\n", runner=run, log_path=self.log))   # same note
+        self.assertEqual(len(run.calls), 1)
+        self.assertIn("SKIPPED (same note sent", self.log.read_text())
+        self.assertIsNotNone(push.recent_duplicate("X4 run stopped (line 17)", log_path=self.log))
+        push.send("X4 run stopped (line 17)", to="alvin@example.com", runner=run, log_path=self.log)   # other recipient
+        push.send("X4 run stopped (line 17)", runner=run, log_path=self.log, dedupe_hours=0)          # forced
+        self.assertEqual(len(run.calls), 3)
+        later = __import__("time").time() + 7 * 3600
+        self.assertIsNone(push.recent_duplicate("X4 run stopped (line 17)", log_path=self.log, now=later))
+
     def test_email_copy_goes_through_mail_app_with_argv(self):
         run = FakeRun()
         self.assertIn("--set-email", push.send_email("hi", runner=run, log_path=self.log))

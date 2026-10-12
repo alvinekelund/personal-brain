@@ -460,6 +460,12 @@ def check_vault(root: Path, today: date | None = None, now: float | None = None)
     else:
         errors, warnings = loops.lint(root, today)
         n_open = len(loops.load(root).open)
+        # a NOW.md behind its sources is a stale generated view, not a broken ledger: it re-renders on the next
+        # `brain now render`, area touch or nightly sync. As a fail it pushed "✗ BRAIN BROKEN" to Alvin's phone
+        # (morning brief, Oct 12 2026 08:10).
+        stale_now = [e for e in errors if "NOW.md" in e and "out of date" in e]
+        errors = [e for e in errors if e not in stale_now]
+        warnings = stale_now + warnings
         if errors:
             out.append(Check("loops", "fail", f"{n_open} open · {len(errors)} lint error(s): " + "; ".join(errors[:3])))
         elif warnings:

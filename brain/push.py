@@ -23,6 +23,8 @@ EMAIL_FROM_KEY = "push_email_from"   # the Mail.app account address to send from
 SUBJECT_MAX = 60
 MAX_CHARS = 1000                # iMessage carries more, but a push should stay a note
 TIMEOUT = 25.0
+DEDUPE_HOURS = 6.0       # an identical note to the same recipient within this window is not sent again
+                         # (Oct 12 2026: one "run stopped" alert reached the phone twice, 66 min apart)
 RUNNER = subprocess.run   # looked up at call time, so tests can replace it and never reach Messages.app
 
 _SCRIPT = [
@@ -121,9 +123,39 @@ def set_handle(value: str) -> str:
     return value
 
 
-def send(text: str, to: str = "", runner=None, log_path: Path | None = None) -> str | None:
+def recent_duplicate(text: str, to: str = "", hours: float = DEDUPE_HOURS, log_path: Path | None = None,
+                     now: float | None = None) -> str | None:
+    """When the same note went to the same recipient within `hours`, the time it was sent
+    ('YYYY-MM-DD HH:MM:SS'); else None. Reads the push log, newest first."""
+    log_path = log_path or LOG_PATH
+    text = " ".join((text or "").split())
+    to = (to or handle()).strip()
+    if not text or not to or hours <= 0:
+        return None
+    if len(text) > MAX_CHARS:
+        text = text[:MAX_CHARS - 1] + "…"
+    now = now or time.time()
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()[-300:]
+    except OSError:
+        return None
+    for ln in reversed(lines):
+        try:
+            t = time.mktime(time.strptime(ln[:19], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            continue
+        if now - t > hours * 3600:
+            break                                 # the log is in time order: everything older is older still
+        if ln[20:] == f"sent → {to}: {text}":
+            return ln[:19]
+    return None
+
+
+def send(text: str, to: str = "", runner=None, log_path: Path | None = None,
+         dedupe_hours: float | None = None) -> str | None:
     """Send `text` as an iMessage to `to` (default: the configured handle).
-    Returns None on success, else the reason. Every attempt is logged."""
+    Returns None on success (or when the identical note already went out within
+    `dedupe_hours`, default DEDUPE_HOURS; 0 always sends), else the reason. Every attempt is logged."""
     runner = runner or RUNNER
     log_path = log_path or LOG_PATH           # resolved now, so a test's LOG_PATH patch is honoured
     text = " ".join((text or "").split())
@@ -134,6 +166,10 @@ def send(text: str, to: str = "", runner=None, log_path: Path | None = None) -> 
         return "no recipient: run `brain push --set-to <your number>` once"
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS - 1] + "…"
+    dup = recent_duplicate(text, to, DEDUPE_HOURS if dedupe_hours is None else dedupe_hours, log_path)
+    if dup:
+        _log(log_path, f"SKIPPED (same note sent {dup}) → {to}: {text}")
+        return None
     args = ["osascript"]
     for line in _SCRIPT:
         args += ["-e", line]
