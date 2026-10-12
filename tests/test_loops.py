@@ -242,6 +242,7 @@ class LintTests(LoopsTestCase):
         self.assertIn("L-001 overdue by 11d", joined)
         self.assertIn("untouched for 9d", joined)
         self.assertIn("waiting on someone for 9d", joined)
+        self.assertNotIn("L-002 untouched", joined)                        # due in 82 days: no touch needed yet
         self.assertNotIn("next action over", joined)                       # all short so far
         self.add(title="Long", due="2026-12-01", next_="x " * 150)
         self.add(title="Long 2", due="2026-12-01", next_="y " * 150)
@@ -249,6 +250,10 @@ class LintTests(LoopsTestCase):
         long_lines = [w for w in warnings if "next action over" in w]
         self.assertEqual(len(long_lines), 1)                                # one line for all of them
         self.assertIn("2 loop(s) with a next action over 200 chars (L-004, L-005)", long_lines[0])
+        self.add(title="Soon", due="2026-09-25")
+        _, soon = loops.lint(self.root, date(2026, 9, 10))
+        self.assertIn("L-006 untouched for 9d", "\n".join(soon))            # due in 15 days: stalled
+        self.assertNotIn("L-004 untouched", "\n".join(soon))                # due Dec 1: not yet
 
 
 class TodayTests(LoopsTestCase):

@@ -65,12 +65,13 @@ class BrainTestCase(unittest.TestCase):
         llm.generate, llm.embed = self._orig_generate, self._orig_embed
         config.CONFIG_PATH = self._orig_config_path
 
-    def _age(self, node_id, days):
+    def _age(self, node_id, days, now=None):
         """Backdate a node's clocks (last_accessed AND last_decayed) by `days` days,
-        i.e. 'this node was last seen and last decayed `days` ago'."""
+        i.e. 'this node was last seen and last decayed `days` ago' (relative to `now`, default the real clock)."""
+        t = (now or time.time()) - days * DAY
         self.conn.execute(
             "UPDATE nodes SET last_accessed = ?, last_decayed = ? WHERE id = ?",
-            (time.time() - days * DAY, time.time() - days * DAY, node_id),
+            (t, t, node_id),
         )
         self.conn.commit()
 
@@ -125,15 +126,16 @@ class DecayClockTests(BrainTestCase):
                            content="A hackathon running September 19-20, 2026 on the MIT campus.")
         past = db.add_node(self.conn, "Grandfather's Funeral", type_="event", importance=0.3,
                            content="Held in Helsinki on May 12, 2026.")
-        self._age(hack, 60); self._age(past, 60)
-        decay.run_decay(self.conn, now=_time.time())                          # today: Sep 6 2026
+        t0 = _time.mktime((2026, 9, 6, 12, 0, 0, 0, 0, -1))                # a fixed Sep 6 2026: the real clock
+        self._age(hack, 60, now=t0); self._age(past, 60, now=t0)            # passed Sep 20 and broke this test
+        decay.run_decay(self.conn, now=t0)                                    # today: Sep 6 2026
         self.assertEqual(db.get_node(self.conn, hack)["weight"], 1.0)         # still ahead: untouched
         self.assertLess(db.get_node(self.conn, past)["weight"], 1.0)          # over: fades
         self.assertTrue(decay.upcoming("Sept 19th, 2026", date(2026, 9, 6)))
         self.assertFalse(decay.upcoming("Sept 19th, 2026", date(2026, 9, 21)))
         self.assertTrue(decay.upcoming("due on October 4", date(2026, 9, 6)))   # no year: this year
         self.assertFalse(decay.upcoming("no date here", date(2026, 9, 6)))
-        decay.run_decay(self.conn, now=_time.time() + 20 * 86400)             # Sep 26: the hackathon is over
+        decay.run_decay(self.conn, now=t0 + 20 * 86400)                       # Sep 26: the hackathon is over
         self.assertLess(db.get_node(self.conn, hack)["weight"], 1.0)
 
     def test_run_and_refresh_rewrites_the_views_on_archive(self):

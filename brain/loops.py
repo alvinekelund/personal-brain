@@ -53,6 +53,8 @@ DATE_FMT = "%Y-%m-%d"
 FIELD_KEYS = ("due", "owner", "area", "prio", "since", "touched", "next", "done", "note")
 
 STALE_DAYS = 7          # lint warns when an open loop hasn't been touched this long
+UNTOUCHED_HORIZON_DAYS = 21   # ...but only when it is due within this many days (or overdue): a loop due next year
+                              # needs no touch yet (L-073, L-071, L-158 drew 'untouched 35d' warnings for months, Oct 2026)
 WAITING_NAG_DAYS = 5    # lint warns when a waiting-for is older than this
 NEXT_MAX_CHARS = 200    # a next action longer than this is narrative, not a step (one aggregated lint warning)
 
@@ -494,7 +496,7 @@ def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
         age = (today - (l.touched or l.since or today)).days
         if l.due < today:
             warnings.append(f"{l.id} overdue by {(today - l.due).days}d: {l.title}")
-        if age > STALE_DAYS:
+        if age > STALE_DAYS and (l.due - today).days <= UNTOUCHED_HORIZON_DAYS:
             warnings.append(f"{l.id} untouched for {age}d: {l.title}")
         if l.waiting_on and age > WAITING_NAG_DAYS:
             warnings.append(f"{l.id} waiting on {l.waiting_on} for {age}d — nudge")
