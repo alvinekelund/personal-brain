@@ -385,3 +385,36 @@ class DoctorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GraphFreshnessTests(unittest.TestCase):
+    """The graph check counts file indexing as learning too (D-014; Oct 12 2026)."""
+
+    def make_db(self, ingested_h, indexed_h, with_files=True):
+        import sqlite3, tempfile, time
+        d = tempfile.mkdtemp()
+        p = Path(d) / "brain.db"
+        c = sqlite3.connect(str(p))
+        c.execute("CREATE TABLE nodes (id TEXT, archived INTEGER)")
+        c.execute("INSERT INTO nodes VALUES ('a', 0)")
+        c.execute("CREATE TABLE ingestion_log (id TEXT, ingested_at REAL)")
+        if ingested_h is not None:
+            c.execute("INSERT INTO ingestion_log VALUES ('x', ?)", (time.time() - ingested_h * 3600,))
+        if with_files:
+            c.execute("CREATE TABLE vault_files (path TEXT, indexed_at REAL)")
+            if indexed_h is not None:
+                c.execute("INSERT INTO vault_files VALUES ('a.md', ?)", (time.time() - indexed_h * 3600,))
+        c.commit(); c.close()
+        return p
+
+    def test_old_ingest_but_fresh_files_is_ok(self):
+        r = doctor.check_db(self.make_db(72, 1))
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertIn("files indexed 1h ago", r.detail)
+
+    def test_both_stale_warns(self):
+        self.assertEqual(doctor.check_db(self.make_db(72, 60)).status, "warn")
+
+    def test_no_file_index_keeps_old_rule(self):
+        self.assertEqual(doctor.check_db(self.make_db(72, None, with_files=False)).status, "warn")
+        self.assertEqual(doctor.check_db(self.make_db(2, None, with_files=False)).status, "ok")

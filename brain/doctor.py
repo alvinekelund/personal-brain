@@ -69,14 +69,24 @@ def check_db(db_path: Path = DB_PATH, now: float | None = None) -> Check:
         conn = sqlite3.connect(str(db_path))
         active = conn.execute("SELECT COUNT(*) FROM nodes WHERE archived=0").fetchone()[0]
         last = conn.execute("SELECT MAX(ingested_at) FROM ingestion_log").fetchone()[0]
+        try:
+            filed = conn.execute("SELECT MAX(indexed_at) FROM vault_files").fetchone()[0]
+        except sqlite3.Error:
+            filed = None   # no file index yet
         conn.close()
     except sqlite3.Error as e:
         return Check("graph", "fail", f"cannot read {db_path}: {e}")
-    if last is None:
+    if last is None and filed is None:
         return Check("graph", "warn", f"{active} nodes, never ingested")
-    age = _age_h(last, now)
-    status = "warn" if age > STALE_HOURS else "ok"
-    return Check("graph", status, f"{active} nodes · last ingest {age:.0f}h ago")
+    # Files are the brain (D-014) and `brain index` makes them searchable, so the graph's own ingest is one of
+    # two ways knowledge arrives: only both going quiet means the brain stopped learning. Every card warned
+    # "last ingest 72h ago" on Oct 12 2026 while 609 files were indexed and searchable.
+    ages = [a for a in (_age_h(last, now) if last else None, _age_h(filed, now) if filed else None) if a is not None]
+    status = "warn" if min(ages) > STALE_HOURS else "ok"
+    detail = f"{active} nodes · last ingest {_age_h(last, now):.0f}h ago" if last else f"{active} nodes, never ingested"
+    if filed:
+        detail += f" · files indexed {_age_h(filed, now):.0f}h ago"
+    return Check("graph", status, detail)
 
 
 API_PROBE_URL = "https://generativelanguage.googleapis.com/"
