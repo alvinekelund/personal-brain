@@ -550,6 +550,25 @@ def merge(id1, id2):
 @cli.command()
 @click.argument("a")
 @click.argument("b")
+def distinct(a, b):
+    """Mark two nodes as different things, so the doctor stops listing them as a possible duplicate
+    (the opposite of `brain merge`; ids from `brain tree`, or exact names)."""
+    conn = db.connect()
+    n1 = db.get_node(conn, a) or db.get_node_by_name(conn, a)
+    n2 = db.get_node(conn, b) or db.get_node_by_name(conn, b)
+    if not n1 or not n2:
+        click.echo("One or both nodes not found — use ids from `brain tree` or the exact names.", err=True)
+        sys.exit(1)
+    if n1["id"] == n2["id"]:
+        click.echo("That is the same node twice.", err=True)
+        sys.exit(1)
+    added = config.add_distinct(n1["name"], n2["name"])
+    click.echo(f"{'Marked' if added else 'Already marked'} as different: {n1['name']} ≠ {n2['name']}")
+
+
+@cli.command()
+@click.argument("a")
+@click.argument("b")
 @click.option("--relation", default=None, help="only this relation (default: every cross-link between the two)")
 def unlink(a, b, relation):
     """Remove the cross-link(s) between two nodes (ids from `brain tree`, or exact names).

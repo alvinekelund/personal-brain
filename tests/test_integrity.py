@@ -73,6 +73,33 @@ class IntegrityTests(BrainTestCase):
         gp = db.add_node(c, "Alvin's Grandfather", type_="person"); db.add_edge(c, gp, fam, "part_of")
         c.commit()
 
+    def test_distinct_pairs_are_not_listed(self):
+        """`brain distinct A B` marks two different things; the doctor re-listed the two Barcelona
+        flights and Google vs Duolingo in every card although the vault said "do not merge" (Oct 12 2026)."""
+        import brain.config as config
+        self.build_broken()
+        saved = config.load
+        config.load = lambda: {"distinct_pairs": [["heli", "Heli Korhonen "], ["x", "y", "z"], "junk"]}
+        try:
+            r = integrity.check(self.conn, "Alvin")
+        finally:
+            config.load = saved
+        self.assertNotIn(("Heli", "Heli Korhonen"), r.duplicates)              # marked: case/space-insensitive
+        self.assertIn(("AC 215", "AC215"), r.duplicates)                        # unmarked pairs still listed
+
+    def test_add_distinct_records_once(self):
+        import tempfile
+        import brain.config as config
+        with tempfile.TemporaryDirectory() as d:
+            saved = config.CONFIG_PATH
+            config.CONFIG_PATH = Path(d) / "config.json"
+            try:
+                self.assertTrue(config.add_distinct("Flight A", "Flight B"))
+                self.assertFalse(config.add_distinct("flight b", "flight a"))   # same pair, any order or case
+                self.assertEqual(config.distinct_pairs(), {frozenset(("flight a", "flight b"))})
+            finally:
+                config.CONFIG_PATH = saved
+
     def test_check_reports_every_problem(self):
         self.build_broken()
         r = integrity.check(self.conn, "Alvin")

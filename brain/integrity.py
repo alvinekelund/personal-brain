@@ -324,6 +324,15 @@ def check(conn, user: str = "", oversized_threshold: int | None = None) -> Repor
                 if frozenset((names[i], names[j])) not in seen_pairs:
                     r.duplicates.append((names[i], names[j]))
                     seen_pairs.add(frozenset((names[i], names[j])))
+    # pairs marked as two different things (`brain distinct A B`): the doctor listed the two Barcelona
+    # flights and Google vs Duolingo in every card for days although the vault said "do not merge"
+    from brain import config as _config
+    distinct = _config.distinct_pairs()
+    if distinct:
+        def _marked(a, b):
+            return frozenset((a.strip().lower(), b.strip().lower())) in distinct
+        r.duplicates = [p for p in r.duplicates if not _marked(p[0], p[1])]
+        r.semantic_duplicates = [p for p in r.semantic_duplicates if not _marked(p[0], p[1])]
     return r
 
 

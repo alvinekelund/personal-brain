@@ -161,7 +161,7 @@ def check_graph_integrity(db_path: Path = DB_PATH, user: str = "") -> Check:
     if not rep.clean:   # every non-structural finding warns; a new Report field cannot slip through green again
         detail = rep.summary()
         if rep.duplicates:
-            detail += ": " + "; ".join(f"{a} ~ {b}" for a, b in rep.duplicates[:3]) + " (brain merge)"
+            detail += ": " + "; ".join(f"{a} ~ {b}" for a, b in rep.duplicates[:3]) + " (brain merge; brain distinct if they differ)"
         return Check("graph-tree", "warn", detail)
     return Check("graph-tree", "ok", rep.summary())
 
