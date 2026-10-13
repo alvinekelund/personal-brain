@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, timedelta, datetime
 from pathlib import Path
 
 from brain import loops
@@ -317,7 +317,7 @@ def lint(root: Path, today: date | None = None, include_today: bool = False) -> 
         # the areas) at 21:30, so only a mention from an earlier day that no touch covered is drift (Oct 13 2026:
         # counting today flagged brain/harvard/training in every session from the first morning log line). The
         # nightly itself runs `brain now lint --include-today` to get today's list.
-        hits = log_mentions_after(root, aliases, upd, before=None if include_today else today)
+        hits = log_mentions_after(root, aliases, upd, before=today + timedelta(days=1) if include_today else today)
         if hits:
             warnings.append(f"{rel}: updated {upd} but {', '.join(hits)} mention(s) it — refresh `## Now` and `brain area touch {key}`")
     for s in _load_dir(root, "apps"):

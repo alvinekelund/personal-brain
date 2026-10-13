@@ -144,6 +144,9 @@ class LintTests(NowTestCase):
         self.assertTrue(any("areas/harvard.md: updated 2026-09-01 but 2026-09-02.md" in w_ for w_ in warnings), warnings)
         _, warnings = now.lint(self.root, TODAY, include_today=True)                  # the nightly's view
         self.assertTrue(any("areas/harvard.md: updated 2026-09-01 but 2026-09-02.md" in w_ for w_ in warnings), warnings)
+        w(self.root / "log/2026-09-03.md", "- 08:00 the petition was filed.\n")         # a later day never counts for --date
+        _, warnings = now.lint(self.root, TODAY, include_today=True)
+        self.assertFalse(any("2026-09-03.md" in w_ for w_ in warnings), warnings)
 
     def test_errors(self):
         now.write(self.root)
