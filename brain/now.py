@@ -139,8 +139,9 @@ def _load_dir(root: Path, sub: str) -> list[Source]:
     return out
 
 
-def log_mentions_after(root: Path, aliases: list[str], since: date) -> list[str]:
-    """Log files dated after `since` that mention any alias (whole word, case-insensitive)."""
+def log_mentions_after(root: Path, aliases: list[str], since: date, before: date | None = None) -> list[str]:
+    """Log files dated after `since` (and before `before`, when given) that mention any alias (whole word,
+    case-insensitive)."""
     logs = Path(root) / "log"
     if not logs.is_dir() or not aliases:
         return []
@@ -150,7 +151,8 @@ def log_mentions_after(root: Path, aliases: list[str], since: date) -> list[str]
         m = LOG_NAME_RE.match(p.name)
         if not m:
             continue
-        if _date(m.group(1), p.name) <= since:
+        day = _date(m.group(1), p.name)
+        if day <= since or (before is not None and day >= before):
             continue
         text = p.read_text(encoding="utf-8", errors="replace").lower()
         if any(pat.search(text) for pat in pats):
@@ -311,7 +313,10 @@ def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
         elif len(block) > MAX_NOW_LINES:
             warnings.append(f"{rel}: `## Now` has {len(block)} lines (max {MAX_NOW_LINES}; only the first {MAX_NOW_LINES} render)")
         aliases = list(s.fm.get("aliases", [])) + [key]
-        hits = log_mentions_after(root, aliases, upd)
+        # Today's log is still open: the nightly sync folds each day's log into the `## Now` blocks (and touches
+        # the areas) at 21:30, so only a mention from an earlier day that no touch covered is drift (Oct 13 2026:
+        # counting today flagged brain/harvard/training in every session from the first morning log line).
+        hits = log_mentions_after(root, aliases, upd, before=today)
         if hits:
             warnings.append(f"{rel}: updated {upd} but {', '.join(hits)} mention(s) it — refresh `## Now` and `brain area touch {key}`")
     for s in _load_dir(root, "apps"):

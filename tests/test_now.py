@@ -132,6 +132,17 @@ class LintTests(NowTestCase):
         self.assertIn("updated: 2026-09-02", (self.root / "areas/jobs.md").read_text())
         self.assertIn("### Job search · updated Sep 2", (self.root / "NOW.md").read_text())
 
+    def test_todays_log_is_in_grace_until_the_nightly(self):
+        # today's log mentions the harvard petition after harvard.md's update; the nightly folds it in at 21:30,
+        # so it only counts as drift from the next day on (Oct 13 2026)
+        now.write(self.root)
+        w(self.root / "areas/harvard.md", (self.root / "areas/harvard.md").read_text().replace("updated: 2026-09-02", "updated: 2026-09-01"))
+        w(self.root / "log/2026-09-02.md", "- 10:15 the petition came back approved.\n")
+        _, warnings = now.lint(self.root, TODAY)
+        self.assertFalse(any("areas/harvard.md" in w_ for w_ in warnings), warnings)
+        _, warnings = now.lint(self.root, date(2026, 9, 3))
+        self.assertTrue(any("areas/harvard.md: updated 2026-09-01 but 2026-09-02.md" in w_ for w_ in warnings), warnings)
+
     def test_errors(self):
         now.write(self.root)
         w(self.root / "areas/training.md", "# Training\n## Now\n- x\n")                          # no front-matter
