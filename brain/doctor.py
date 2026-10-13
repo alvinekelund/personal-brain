@@ -489,6 +489,11 @@ def check_vault(root: Path, today: date | None = None, now: float | None = None)
     if now.is_generated(root):
         n_err, n_warn = now.lint(root, today)
         n_err = [e for e in n_err if "LOOPS" not in e]   # loop problems are reported above
+        # now.lint() appends the same stale-view line as the loops check above: demote it the same way, or a
+        # generated NOW.md behind its sources still reads "✗ BRAIN BROKEN" (review, Oct 12 2026)
+        stale_now = [e for e in n_err if "NOW.md" in e and "out of date" in e]
+        n_err = [e for e in n_err if e not in stale_now]
+        n_warn = stale_now + n_warn
         if n_err:
             out.append(Check("now.md", "fail", f"{len(n_err)} error(s): " + "; ".join(n_err[:3])))
         elif n_warn:

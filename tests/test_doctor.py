@@ -191,6 +191,22 @@ class DoctorTests(unittest.TestCase):
         p.write_text(p.read_text() + "- [ ] L-001 · dup · due 2026-09-09 · owner alvin · area jobs · next: n\n")
         self.assertEqual(by_name(self.run_doctor())["loops"].status, "fail")   # duplicate id: the ledger is wrong
 
+    def test_stale_generated_now_md_is_not_brain_broken(self):
+        """The real NOW.md is generated, so now.lint() reports the same stale-view line: the loops check
+        warned while the now.md check still failed and kept "✗ BRAIN BROKEN" (review, Oct 12 2026)."""
+        import brain.now as now
+        (self.root / "IDENTITY.md").write_text("**Alvin**\n")
+        loops.add(self.root, "A", "2026-09-09", "alvin", "jobs", "n", today=TODAY, commit=False)
+        decisions.append(self.root, "T", "d", "w", when=TODAY, commit=False)
+        now.write(self.root)
+        (self.root / "IDENTITY.md").write_text("**Alvin** moved to Boston\n")   # a source edit, no re-render
+        checks = by_name(self.run_doctor())
+        self.assertEqual([n for n, c in checks.items() if c.status == "fail"], [])
+        self.assertEqual(checks["now.md"].status, "warn")
+        self.assertIn("out of date", checks["now.md"].detail)
+        self.assertNotEqual(doctor.worst(list(checks.values())), "fail")
+        self.assertFalse(doctor.brief(list(checks.values())).startswith("✗ BRAIN BROKEN"))
+
     def test_missing_db(self):
         self.assertEqual(by_name(self.run_doctor(db_path=self.tmp / "nope.db"))["graph"].status, "fail")
 
@@ -390,10 +406,6 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(by_name(self.run_doctor())["mcp"].status, "warn")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GraphFreshnessTests(unittest.TestCase):
     """The graph check counts file indexing as learning too (D-014; Oct 12 2026)."""
 
@@ -425,3 +437,20 @@ class GraphFreshnessTests(unittest.TestCase):
     def test_no_file_index_keeps_old_rule(self):
         self.assertEqual(doctor.check_db(self.make_db(72, None, with_files=False)).status, "warn")
         self.assertEqual(doctor.check_db(self.make_db(2, None, with_files=False)).status, "ok")
+
+
+class TestFileLayoutTests(unittest.TestCase):
+    def test_main_guard_is_the_last_statement(self):
+        """unittest.main() exits before anything below it is defined: GraphFreshnessTests sat under the guard,
+        so `python tests/test_doctor.py` ran 0 of its tests without a word (review, Oct 12 2026)."""
+        import ast
+        for p in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
+            body = ast.parse(p.read_text(encoding="utf-8")).body
+            guards = [i for i, n in enumerate(body) if isinstance(n, ast.If)
+                      and "__main__" in ast.unparse(n.test) and "__name__" in ast.unparse(n.test)]
+            for i in guards:
+                self.assertEqual(i, len(body) - 1, f"{p.name}: code after the __main__ guard (line {body[i].lineno})")
+
+
+if __name__ == "__main__":
+    unittest.main()
