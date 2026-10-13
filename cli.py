@@ -1255,9 +1255,11 @@ def now_show():
 
 @now.command("lint")
 @click.option("--date", "today", default=None)
-def now_lint(today):
+@click.option("--include-today", is_flag=True,
+              help="Also count today's log (the nightly sync folds it into the areas; the day's sessions do not).")
+def now_lint(today, include_today):
     """Check NOW.md is current and every area/app/person file is well-formed and fresh. Exit 1 on errors."""
-    errors, warnings = now_mod.lint(_vault_root(), _parse_day(today))
+    errors, warnings = now_mod.lint(_vault_root(), _parse_day(today), include_today=include_today)
     for w in warnings:
         click.echo(f"⚠ {w}")
     for e in errors:

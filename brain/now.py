@@ -281,7 +281,7 @@ def stale(root: Path) -> str:
 
 # ── lint ──────────────────────────────────────────────────────────────────────
 
-def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
+def lint(root: Path, today: date | None = None, include_today: bool = False) -> tuple[list[str], list[str]]:
     root = Path(root)
     today = today or date.today()
     errors, warnings = [], []
@@ -315,8 +315,9 @@ def lint(root: Path, today: date | None = None) -> tuple[list[str], list[str]]:
         aliases = list(s.fm.get("aliases", [])) + [key]
         # Today's log is still open: the nightly sync folds each day's log into the `## Now` blocks (and touches
         # the areas) at 21:30, so only a mention from an earlier day that no touch covered is drift (Oct 13 2026:
-        # counting today flagged brain/harvard/training in every session from the first morning log line).
-        hits = log_mentions_after(root, aliases, upd, before=today)
+        # counting today flagged brain/harvard/training in every session from the first morning log line). The
+        # nightly itself runs `brain now lint --include-today` to get today's list.
+        hits = log_mentions_after(root, aliases, upd, before=None if include_today else today)
         if hits:
             warnings.append(f"{rel}: updated {upd} but {', '.join(hits)} mention(s) it — refresh `## Now` and `brain area touch {key}`")
     for s in _load_dir(root, "apps"):
