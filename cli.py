@@ -477,7 +477,14 @@ def index_cmd(no_embed, show_status):
     slow = "" if no_embed else doctor_mod.api_known_slow()
     if slow:
         click.echo(f"  skipping embeddings: the last probe found the API slow ({slow[:60]}) — `brain index` again later", err=True)
-    s = vindex.build(conn, root, embed=not no_embed and not slow)
+    release = vindex.acquire_lock(root)
+    if release is None:
+        click.echo("  another `brain index` has held the lock for 2 min; skipped (the next index catches up)", err=True)
+        return
+    try:
+        s = vindex.build(conn, root, embed=not no_embed and not slow)
+    finally:
+        release()
     click.echo(f"Indexed {s['files']} vault file(s): {s['added']} added, {s['updated']} updated, "
                f"{s['removed']} removed, {s['unchanged']} unchanged · {s['links']} file link(s), "
                f"{s['node_links']} node link(s), {s['embedded']} embedded · "
@@ -1157,7 +1164,7 @@ def today(today, days, brief, no_doctor):
 
 @cli.command("doctor")
 @click.option("--brief", is_flag=True, help="One summary line.")
-@click.option("--install-hooks", is_flag=True, help="Install the vault's append-only pre-commit hook.")
+@click.option("--install-hooks", is_flag=True, help="Install the vault's git hooks: append-only pre-commit, re-index post-commit.")
 @click.option("--repair", is_flag=True, help="Fix structural graph problems (orphans, multi-parent, cycles) first.")
 @click.option("--date", "today", default=None)
 def doctor_cmd(brief, install_hooks, repair, today):
@@ -1165,6 +1172,9 @@ def doctor_cmd(brief, install_hooks, repair, today):
     root = _vault_root()
     if install_hooks:
         click.echo("pre-commit hook: " + ("installed" if decisions.install_pre_commit(root) else "vault is not a git repo"))
+        from brain import index as index_mod
+        click.echo("post-commit hook: " + ("installed" if index_mod.install_post_commit(root)
+                                           else "not installed (vault is not a git repo, or another post-commit hook is there)"))
     if repair:
         _repair()
     checks = doctor_mod.run(root, _parse_day(today))

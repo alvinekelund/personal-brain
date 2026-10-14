@@ -695,3 +695,83 @@ def _window(line: str, q_tokens: set, room: int) -> str:
 def nodes_for_path(conn, rel_path: str) -> list:
     return [db.get_node(conn, r["node_id"]) for r in
             conn.execute("SELECT node_id FROM vault_file_nodes WHERE path = ?", (rel_path,))]
+
+
+# ── keep the index current after every vault commit ─────────────────────────────
+
+POST_COMMIT_MARK = "Vault post-commit hook (installed by `brain doctor --install-hooks`)"
+POST_COMMIT_HOOK = """#!/bin/sh
+# {mark}: re-index what the commit changed,
+# in the background, so `brain ask` and the doctor's vault-index check see every commit (the CLI's own loop and
+# decision commits too; Oct 14 2026, the doctor flagged a stale index in most sessions). One indexer at a time (a
+# lock dir in .git); it runs again while new commits land during a run. Never blocks or fails the commit.
+BRAIN="{brain}"
+[ -x "$BRAIN" ] || exit 0
+GD=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+LOCK="$GD/brain-index.lock"
+find "$LOCK" -maxdepth 0 -mmin +15 -exec rmdir {{}} \\; 2>/dev/null
+(
+  mkdir "$LOCK" 2>/dev/null || exit 0
+  trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+  while :; do
+    head=$(git rev-parse HEAD 2>/dev/null)
+    BRAIN_INDEX_LOCKED=1 "$BRAIN" index >/dev/null 2>&1
+    [ "$(git rev-parse HEAD 2>/dev/null)" = "$head" ] && break
+  done
+) </dev/null >/dev/null 2>&1 &
+exit 0
+"""
+
+
+def install_post_commit(root: Path, brain: str | None = None) -> bool:
+    """Install the vault's post-commit index hook. False when the vault is not a git repo or another
+    post-commit hook is already there (it is left alone)."""
+    import sys
+    hooks = Path(root) / ".git" / "hooks"
+    if not hooks.is_dir():
+        return False
+    text = POST_COMMIT_HOOK.format(mark=POST_COMMIT_MARK, brain=brain or str(Path(sys.executable).with_name("brain")))
+    target = hooks / "post-commit"
+    if target.is_file():
+        old = target.read_text(encoding="utf-8", errors="replace")
+        if POST_COMMIT_MARK not in old:
+            return False
+        if old == text:
+            return True
+    target.write_text(text, encoding="utf-8")
+    target.chmod(0o755)
+    return True
+
+
+def acquire_lock(root: Path, wait: float = 120.0):
+    """One `brain index` at a time: the post-commit hook runs one in the background while routines run their own
+    right after committing, and an index holds a write transaction through its embedding calls. Takes the lock dir
+    .git/brain-index.lock (the hook's own; a lock older than 15 min is stale), waiting up to `wait` seconds.
+    → a release function, or None when it timed out. With BRAIN_INDEX_LOCKED set (the hook already holds the lock)
+    or no .git, there is nothing to take."""
+    import os
+    gd = Path(root) / ".git"
+    if os.environ.get("BRAIN_INDEX_LOCKED") or not gd.is_dir():
+        return lambda: None
+    lock, end = gd / "brain-index.lock", time.time() + wait
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 900:
+                    lock.rmdir()
+                    continue
+            except OSError:
+                pass
+            if time.time() >= end:
+                return None
+            time.sleep(0.25)
+
+    def release():
+        try:
+            lock.rmdir()
+        except OSError:
+            pass
+    return release
