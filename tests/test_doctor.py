@@ -396,6 +396,12 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("deck: vault ahead", c.detail)
         self.assertIn("deck-sync", c.detail)
 
+    def test_apps_lint_gets_the_publish_grace(self):
+        script = self.tmp / "render.py"
+        script.write_text("import sys\nprint('apps drift: ' + ' '.join(sys.argv[1:]))\nsys.exit(1)\n")
+        c = doctor.check_apps(script)
+        self.assertIn("--lint --quiet --grace-hours 12", c.detail)
+
     def test_apps_broken_renderer_is_a_warning(self):
         c = doctor.check_apps(self._fake_render(2, "render: LOOPS.md has errors"))
         self.assertEqual(c.status, "warn")

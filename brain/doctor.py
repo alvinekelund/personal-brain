@@ -385,23 +385,29 @@ def check_brief(log_path: Path = DATA_DIR / "brief.log", now: float | None = Non
     return Check("brief", "ok", f"last brief {age_h:.0f}h ago: {text}")
 
 
+APPS_GRACE_H = 12
+
+
 def check_apps(script: Path = APPS_RENDER, python: str = sys.executable, timeout: float = 60) -> Check | None:
     """The app renderer's drift lint (`render.py --lint`): does every published app page
     still match what the vault would render? Apps hold no hand-kept data (D-014), so a
     page that disagrees with the vault is stale, not a second truth. None when no
-    renderer is installed. Drift is a warning: deck-sync renders and publishes."""
+    renderer is installed. Drift is a warning: deck-sync renders and publishes. Pages inside
+    Helm ship only with deck-sync's Helm publishes (four a day, held while he is in Helm), so a
+    lag under APPS_GRACE_H hours is normal, not drift (Oct 14 2026: the midnight date change and
+    every loop edit kept this warning on all day)."""
     script = Path(script)
     if not script.is_file():
         return None
     try:
-        r = subprocess.run([python, str(script), "--lint", "--quiet"],
+        r = subprocess.run([python, str(script), "--lint", "--quiet", "--grace-hours", str(APPS_GRACE_H)],
                            capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError) as e:
         return Check("apps", "warn", f"render.py --lint did not run: {e}")
     lines = (r.stdout.strip() or r.stderr.strip()).splitlines()
     msg = lines[-1] if lines else ""
     if r.returncode == 0:
-        return Check("apps", "ok", msg or "published pages match the vault")
+        return Check("apps", "ok", msg or f"pages current (inside Helm: published within {APPS_GRACE_H} h)")
     if r.returncode == 1:
         return Check("apps", "warn", (msg or "drift")[:240] + " (deck-sync renders + publishes)")
     return Check("apps", "warn", f"render.py --lint exit {r.returncode}: {msg[:200]}")
