@@ -22,7 +22,9 @@ EMAIL_KEY = "push_email"        # optional: an email copy of every push (Alvin's
 EMAIL_FROM_KEY = "push_email_from"   # the Mail.app account address to send from (default: the first account)
 SUBJECT_MAX = 60
 MAX_CHARS = 1000                # iMessage carries more, but a push should stay a note
-TIMEOUT = 25.0
+TIMEOUT = 90.0           # Messages.app can take ~45 s to hand a message to iMessage when it has
+                         # been idle (Oct 18 2026: two nightly-sync pushes timed out at 25 s, then
+                         # the same osascript sent in ~45 s when run by hand)
 DEDUPE_HOURS = 6.0       # an identical note to the same recipient within this window is not sent again
                          # (Oct 12 2026: one "run stopped" alert reached the phone twice, 66 min apart)
 RUNNER = subprocess.run   # looked up at call time, so tests can replace it and never reach Messages.app
