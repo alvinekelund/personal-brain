@@ -10,13 +10,19 @@ Messages.app does.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 from brain import DATA_DIR, config
 
 LOG_PATH = DATA_DIR / "push.log"
+HELD_PATH = DATA_DIR / "push-held.jsonl"   # pushes held in quiet hours, one JSON line each, sent at QUIET_END
+QUIET_START, QUIET_END = 23, 7   # local hours (Alvin, Oct 19 2026: routines run all night now, so a push
+                                 # between 23:00 and 07:00 waits for the morning unless it is --urgent,
+                                 # i.e. a deadline due before 07:00)
 CONFIG_KEY = "push_to"          # the iMessage handle (phone number or Apple ID email)
 EMAIL_KEY = "push_email"        # optional: an email copy of every push (Alvin's Instinct address), via Mail.app
 EMAIL_FROM_KEY = "push_email_from"   # the Mail.app account address to send from (default: the first account)
@@ -183,6 +189,78 @@ def send(text: str, to: str = "", runner=None, log_path: Path | None = None,
         err = str(e)
     _log(log_path, ("sent" if err is None else f"FAILED ({err[:120]})") + f" → {to}: {text}")
     return err
+
+
+def quiet_now(now: datetime | None = None) -> bool:
+    """True between QUIET_START and QUIET_END local time."""
+    h = (now or datetime.now()).hour
+    return h >= QUIET_START or h < QUIET_END
+
+
+def hold(text: str, to: str = "", email: bool = True, held_path: Path | None = None,
+         log_path: Path | None = None) -> str | None:
+    """Keep `text` for the morning instead of sending it now. Returns None, else the reason."""
+    held_path = held_path or HELD_PATH
+    log_path = log_path or LOG_PATH
+    text = " ".join((text or "").split())
+    to = (to or handle()).strip()
+    if not text:
+        return "nothing to send"
+    if not to:
+        return "no recipient: run `brain push --set-to <your number>` once"
+    try:
+        held_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(held_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "to": to, "text": text,
+                                "email": bool(email)}) + "\n")
+    except OSError as e:
+        return str(e)
+    _log(log_path, f"HELD (quiet {QUIET_START:02d}-{QUIET_END:02d}) → {to}: {text}")
+    return None
+
+
+def held(held_path: Path | None = None) -> list[dict]:
+    try:
+        lines = (held_path or HELD_PATH).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for ln in lines:
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            pass
+    return out
+
+
+def flush_held(runner=None, held_path: Path | None = None, log_path: Path | None = None) -> list[str]:
+    """Send what quiet hours held: one iMessage per recipient ("Overnight: a | b"), plus the email
+    copy when any of them asked for one. Kept for the next try if the send fails. Returns the errors."""
+    held_path = held_path or HELD_PATH
+    items = held(held_path)
+    if not items:
+        return []
+    by_to: dict[str, list[dict]] = {}
+    for it in items:
+        by_to.setdefault(it.get("to") or "", []).append(it)
+    errors, keep = [], []
+    for to, its in by_to.items():
+        texts = list(dict.fromkeys(it["text"] for it in its))   # the same note twice goes once
+        text = texts[0] if len(texts) == 1 else "Overnight: " + " | ".join(texts)
+        err = send(text, to=to, runner=runner, log_path=log_path)
+        if err:
+            errors.append(err)
+            keep += its
+        elif any(it.get("email") for it in its) and email_handle():
+            send_email(text, runner=runner, log_path=log_path)
+    try:
+        if keep:
+            held_path.write_text("".join(json.dumps(it) + "\n" for it in keep), encoding="utf-8")
+        else:
+            held_path.unlink()
+    except OSError:
+        pass
+    return errors
 
 
 def _log(log_path: Path, line: str):

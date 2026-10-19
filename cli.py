@@ -806,13 +806,29 @@ def backup(label, keep):
 @click.option("--from", "email_from", default="", help="with --set-email: the Mail.app account address to send from")
 @click.option("--no-email", is_flag=True, help="this push: iMessage only, skip the email copy")
 @click.option("--force", is_flag=True, help="send even when the identical note went out in the last 6 hours")
-def push(text, brief, to, set_to, set_email, email_from, no_email, force):
+@click.option("--urgent", is_flag=True, help="send now even in quiet hours (23:00-07:00): only for a deadline due before 07:00")
+@click.option("--flush", is_flag=True, help="send the pushes quiet hours held (the routines runner does this at 07:00)")
+def push(text, brief, to, set_to, set_email, email_from, no_email, force, urgent, flush):
     """Send yourself a note: an iMessage through this Mac's Messages app and, if
     configured, an email copy through Mail.app — the channel for the morning
-    brief and urgent notices. Every attempt is logged in ~/.personal-brain/push.log;
-    `brain doctor` reads it."""
+    brief and urgent notices. Between 23:00 and 07:00 a note is held and sent at
+    07:00 in one message, unless --urgent. Every attempt is logged in
+    ~/.personal-brain/push.log; `brain doctor` reads it."""
     from datetime import date as _date
     from brain import push as push_mod
+    if flush or (push_mod.held() and not push_mod.quiet_now()):
+        n = len(push_mod.held())
+        if not n:
+            if flush:
+                click.echo("Nothing held.")
+        elif push_mod.quiet_now() and not urgent:
+            click.echo(f"{n} held push(es) wait for 07:00 (--urgent --flush sends them now).")
+        else:
+            errs = push_mod.flush_held()
+            click.echo(f"Held pushes: {n} sent" if not errs else f"Held pushes not sent: {errs[0]}",
+                       err=bool(errs))
+        if flush and not (text or brief):
+            return
     if set_to:
         try:
             click.echo(f"Pushes go to {push_mod.set_handle(set_to)}.")
@@ -847,6 +863,13 @@ def push(text, brief, to, set_to, set_email, email_from, no_email, force):
         if dup:
             click.echo(f"Already sent at {dup[11:16]}; not repeated (--force sends it again).")
             return
+    if push_mod.quiet_now() and not urgent:
+        err = push_mod.hold(text, to=to, email=not no_email and not to)
+        if err:
+            click.echo(f"Not held: {err}", err=True)
+            sys.exit(1)
+        click.echo(f"Held until {push_mod.QUIET_END:02d}:00 (quiet hours; --urgent sends now). Not a failure.")
+        return
     err = push_mod.send(text, to=to, dedupe_hours=0 if force else None)
     if err:
         click.echo(f"Not sent: {err}", err=True)

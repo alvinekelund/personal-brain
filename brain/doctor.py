@@ -339,7 +339,8 @@ def check_push(log_path: Path = DATA_DIR / "push.log", now: float | None = None)
     Messages.app): did the last push go through, and when? push.log is its trace."""
     now = now or time.time()
     try:
-        lines = [l for l in Path(log_path).read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [l for l in Path(log_path).read_text(encoding="utf-8").splitlines()
+                 if l.strip() and not l[20:].startswith("HELD")]   # held for the morning: not an attempt
     except FileNotFoundError:
         return Check("push", "warn", "no push.log yet — `brain push --set-to <your number>` then `brain push --brief`")
     except OSError as e:

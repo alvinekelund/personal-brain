@@ -290,6 +290,9 @@ class DoctorTests(unittest.TestCase):
         c = by_name(self.run_doctor())["push"]
         self.assertEqual(c.status, "fail")
         self.assertIn("not signed in", c.detail)
+        with open(self.push_log, "a") as f:                       # held for the morning: not an attempt
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " HELD (quiet 23-07) → +13392221646: y\n")
+        self.assertEqual(by_name(self.run_doctor())["push"].status, "fail")
         self.push_log.unlink()
         self.assertIn("--set-to", by_name(self.run_doctor())["push"].detail)
         self.assertNotIn("push", by_name(self.run_doctor(push_log=None)))

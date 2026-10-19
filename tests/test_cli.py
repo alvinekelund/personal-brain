@@ -288,12 +288,15 @@ class CliTests(BrainTestCase):
         import brain.push as push_mod
         import brain.doctor as doctor
         orig_run, orig_log, orig_dir = push_mod.RUNNER, push_mod.LOG_PATH, doctor.DATA_DIR
+        orig_held, orig_quiet = push_mod.HELD_PATH, push_mod.quiet_now
         calls = []
 
         class R:
             returncode, stdout, stderr = 0, "sent", ""
         push_mod.RUNNER = lambda args, **kw: calls.append(args) or R()
         push_mod.LOG_PATH = Path(tempfile.mkdtemp()) / "push.log"
+        push_mod.HELD_PATH = push_mod.LOG_PATH.parent / "push-held.jsonl"
+        push_mod.quiet_now = lambda now=None: False          # daytime, whatever the clock says
         doctor.DATA_DIR = Path(tempfile.mkdtemp())
         try:
             r = self.run_cli("push", "hello")
@@ -322,6 +325,51 @@ class CliTests(BrainTestCase):
             self.assertEqual(config.load().get("push_email"), None)
         finally:
             push_mod.RUNNER, push_mod.LOG_PATH, doctor.DATA_DIR = orig_run, orig_log, orig_dir
+            push_mod.HELD_PATH, push_mod.quiet_now = orig_held, orig_quiet
+
+    def test_push_in_quiet_hours_is_held_for_the_morning(self):
+        """Alvin, Oct 19 2026: routines run all night, so a push between 23:00 and 07:00 waits
+        for 07:00 (one message), unless --urgent: a deadline due before 07:00."""
+        import tempfile
+        import brain.push as push_mod
+        orig_run, orig_log = push_mod.RUNNER, push_mod.LOG_PATH
+        orig_held, orig_quiet = push_mod.HELD_PATH, push_mod.quiet_now
+        calls, quiet = [], [True]
+
+        class R:
+            returncode, stdout, stderr = 0, "sent", ""
+        push_mod.RUNNER = lambda args, **kw: calls.append(args) or R()
+        push_mod.LOG_PATH = Path(tempfile.mkdtemp()) / "push.log"
+        push_mod.HELD_PATH = push_mod.LOG_PATH.parent / "push-held.jsonl"
+        push_mod.quiet_now = lambda now=None: quiet[0]
+        try:
+            self.run_cli("push", "--set-to", "+13392221646")
+            r = self.run_cli("push", "New event added: Kempner talk Tue")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertIn("Held until 07:00", r.output)
+            self.run_cli("push", "Helm applied to Figma")
+            self.assertEqual(calls, [])
+            self.assertIn("HELD (quiet 23-07)", push_mod.LOG_PATH.read_text())
+            r = self.run_cli("push", "--urgent", "Stripe form closes 05:00: answer Q3")
+            self.assertEqual(calls[-1][-1], "Stripe form closes 05:00: answer Q3")
+            r = self.run_cli("push", "--flush")
+            self.assertIn("wait for 07:00", r.output)
+            self.assertEqual(len(calls), 1)
+            quiet[0] = False
+            r = self.run_cli("push", "--flush")
+            self.assertEqual(r.exit_code, 0, r.output)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[-1][-1], "Overnight: New event added: Kempner talk Tue | Helm applied to Figma")
+            self.assertFalse(push_mod.HELD_PATH.exists())
+            quiet[0] = True
+            self.run_cli("push", "one more")
+            quiet[0] = False
+            self.run_cli("push", "--brief")                               # the morning brief sends what waits first
+            self.assertEqual(calls[-2][-1], "one more")
+            self.assertEqual(len(calls), 4)
+        finally:
+            push_mod.RUNNER, push_mod.LOG_PATH = orig_run, orig_log
+            push_mod.HELD_PATH, push_mod.quiet_now = orig_held, orig_quiet
 
     def test_backup_snapshots_and_prunes(self):
         import sqlite3, tempfile

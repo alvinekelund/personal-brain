@@ -97,5 +97,35 @@ class PushTests(unittest.TestCase):
             push.set_email("not-an-address")
 
 
+    def test_quiet_hours_are_23_to_07(self):
+        from datetime import datetime
+        q = lambda h, m=0: push.quiet_now(datetime(2026, 10, 19, h, m))
+        self.assertTrue(q(23) and q(0) and q(3) and q(6, 59))
+        self.assertFalse(q(7) or q(12) or q(22, 59))
+
+    def test_held_pushes_go_out_as_one_message_and_stay_when_the_send_fails(self):
+        push.set_handle("+13392221646")
+        held = self.tmp / "held.jsonl"
+        self.assertIsNone(push.hold("Event added: Kempner talk", held_path=held, log_path=self.log))
+        self.assertIsNone(push.hold("Event added:  Kempner talk", held_path=held, log_path=self.log))   # same note
+        self.assertIsNone(push.hold("Helm applied to Figma", email=False, held_path=held, log_path=self.log))
+        self.assertEqual(len(push.held(held)), 3)
+        self.assertIn("HELD (quiet 23-07) → +13392221646: Helm applied to Figma", self.log.read_text())
+        self.assertEqual(push.flush_held(runner=FakeRun(rc=1, out="", err="not signed in"), held_path=held,
+                                         log_path=self.log), ["not signed in"])
+        self.assertEqual(len(push.held(held)), 3)                     # kept for the next try
+        run = FakeRun()
+        self.assertEqual(push.flush_held(runner=run, held_path=held, log_path=self.log), [])
+        self.assertEqual(len(run.calls), 1)                           # no email copy configured
+        self.assertEqual(run.calls[0][-1], "Overnight: Event added: Kempner talk | Helm applied to Figma")
+        self.assertFalse(held.exists())
+        self.assertEqual(push.flush_held(runner=run, held_path=held, log_path=self.log), [])
+        push.hold("Only one", held_path=held, log_path=self.log)
+        push.set_email("alvine@mail.instinct.com")
+        push.flush_held(runner=run, held_path=held, log_path=self.log)
+        self.assertEqual(run.calls[1][-1], "Only one")
+        self.assertIn('tell application "Mail"', " ".join(run.calls[2]))
+
+
 if __name__ == "__main__":
     unittest.main()
