@@ -353,7 +353,8 @@ def repair(conn, user: str) -> dict:
     - dangling edge (its source or target node was deleted): removed;
     - cross-link touching a category (structure noise a merge left behind): removed;
     - passive relation written backwards ("Alvin studied_by Harvard"): turned round;
-    - relates_to beside a part_of between the same two nodes: removed.
+    - relates_to beside a part_of between the same two nodes: removed;
+    - a part_of leaving the person (the root): removed.
     Never deletes or renames nodes; duplicates and embeddings are reported, not fixed."""
     out = {"multi_parent": 0, "categories": 0, "under_identity": 0, "orphans": 0, "cycles": 0,
            "dangling": 0, "category_links": 0, "oriented": 0, "redundant_links": 0}
@@ -391,6 +392,11 @@ def repair(conn, user: str) -> dict:
 
     def part_of_edges(nid):
         return [e for e in db.edges_for_node(conn, nid) if e["source_id"] == nid and e["relation"] == "part_of"]
+
+    # 0c. the person is the root: a part_of leaving it is always a cycle, and the cycle cut
+    # below re-homed it under its type's fallback ("Alvin → Relationships", Oct 2026)
+    out["root_parents"] = conn.execute(
+        "DELETE FROM edges WHERE relation = 'part_of' AND source_id = ?", (ident,)).rowcount
 
     nodes = {n["id"]: n for n in db.all_nodes(conn)}
     # 1. categories → the person, or one parent category (a sub-category)

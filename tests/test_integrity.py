@@ -183,6 +183,19 @@ class IntegrityTests(BrainTestCase):
         self.assertTrue(r.duplicates)
         self.assertEqual(integrity.repair(self.conn, "Alvin")["multi_parent"], 0)   # idempotent
 
+    def test_repair_never_gives_the_person_a_parent(self):
+        """Oct 2026: 'Alvin part_of Relationships' made a cycle with every area; the cycle
+        cut picked the person (biggest subtree) and re-homed it under Relationships again."""
+        c = self.conn
+        db.ensure_identity_anchor(c, "Alvin")
+        me = db.get_node_by_name(c, "Alvin")["id"]
+        rel = db.add_node(c, "Relationships", type_="category"); db.add_edge(c, rel, me, "part_of")
+        db.add_edge(c, me, rel, "part_of")
+        self.assertEqual(len(integrity.check(c, "Alvin").cycles), 1)
+        self.assertEqual(integrity.repair(c, "Alvin")["root_parents"], 1)
+        self.assertEqual(integrity.check(c, "Alvin").cycles, [])
+        self.assertEqual([e for e in db.edges_for_node(c, me) if e["source_id"] == me and e["relation"] == "part_of"], [])
+
     def test_clean_graph(self):
         db.ensure_identity_anchor(self.conn, "Alvin")
         me = db.get_node_by_name(self.conn, "Alvin")["id"]
