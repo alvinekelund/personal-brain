@@ -892,6 +892,15 @@ class IngestTests(BrainTestCase):
         self.assertEqual(ex["edges"], [])
         self.assertEqual(extract.drop_source_nodes(ex, ""), 0)
 
+    def test_unfold_category_labels(self):
+        ex = {"nodes": [{"name": "Career > Job Search", "type": "category"},
+                        {"name": "Door hunt", "type": "project", "parent": "Career > Job Search"}],
+              "edges": [{"source": "Door hunt", "target": "Career > Job Search", "relation": "part_of"}]}
+        self.assertEqual(extract.unfold_category_labels(ex), 1)
+        self.assertEqual(ex["nodes"][0], {"name": "Job Search", "type": "category", "parent": "Career"})
+        self.assertEqual(ex["nodes"][1]["parent"], "Job Search")
+        self.assertEqual(ex["edges"][0]["target"], "Job Search")
+
     def test_prompt_has_no_task_node_type(self):
         self.assertNotIn("task         —", extract.SYSTEM)
         self.assertIn('"tasks": ["..."]', extract.SYSTEM)

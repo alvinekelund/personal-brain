@@ -880,6 +880,37 @@ def drop_source_nodes(extracted: dict, source: str) -> int:
     return len(dropped)
 
 
+def unfold_category_labels(extracted: dict) -> int:
+    """A node named like the prompt's "Area > Sub-category" label is the
+    sub-category under that area. The parent field was already unfolded (Sep 6);
+    the node name was not, so Sep 8 - Oct 21 2026 left 19 categories named
+    "Career > Job Search & Career Development" beside the real sub-category,
+    rooted at the person. Renames the node, points edges and parents at the new
+    name, and files it under its area when no parent was given. Returns nodes renamed."""
+    renamed = {}
+    for n in extracted.get("nodes", []) or []:
+        name = (n.get("name") or "").strip()
+        if " > " not in name:
+            continue
+        area, sub = (s.strip() for s in name.rsplit(" > ", 1))
+        if not sub:
+            continue
+        n["name"] = sub
+        if not (n.get("parent") or "").strip() and area:
+            n["parent"] = area.rsplit(" > ", 1)[-1].strip()
+        renamed[name] = sub
+    if renamed:
+        for n in extracted.get("nodes", []) or []:
+            p = (n.get("parent") or "").strip()
+            if p in renamed:
+                n["parent"] = renamed[p]
+        for e in extracted.get("edges", []) or []:
+            for end in ("source", "target"):
+                if (e.get(end) or "").strip() in renamed:
+                    e[end] = renamed[e[end].strip()]
+    return len(renamed)
+
+
 def route_tasks(tasks: list[str], source: str = "", inbox_root=None) -> int:
     """Append diverted tasks to the vault's loop inbox. Best-effort: the graph
     write path must never fail because the vault is unavailable."""
@@ -1000,6 +1031,7 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
            f"{len(ex.get('tasks', []) or [])} task(s)", t0)
     route_tasks(divert_tasks(ex), source=source, inbox_root=inbox_root)
     drop_source_nodes(ex, source)
+    unfold_category_labels(ex)
 
     if late():
         _stage(f"entity-link: skipped, past the {deadline_s:.0f}s ingest deadline "
