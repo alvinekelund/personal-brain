@@ -883,6 +883,15 @@ class IngestTests(BrainTestCase):
         self.assertEqual(ex["edges"], [{"source": "A", "target": "A"}])
         self.assertEqual(ex["tasks"], [])
 
+    def test_drop_source_nodes(self):
+        ex = {"nodes": [{"name": "Helm", "type": "artifact"}, {"name": "claude-code session 9f441127", "type": "event"},
+                        {"name": "Source: claude-code session 9f441127", "type": "artifact"}],
+              "edges": [{"source": "Helm", "target": "claude-code session 9f441127", "relation": "created_by"}]}
+        self.assertEqual(extract.drop_source_nodes(ex, "claude-code session 9f441127"), 2)
+        self.assertEqual([n["name"] for n in ex["nodes"]], ["Helm"])
+        self.assertEqual(ex["edges"], [])
+        self.assertEqual(extract.drop_source_nodes(ex, ""), 0)
+
     def test_prompt_has_no_task_node_type(self):
         self.assertNotIn("task         —", extract.SYSTEM)
         self.assertIn('"tasks": ["..."]', extract.SYSTEM)

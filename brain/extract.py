@@ -858,6 +858,28 @@ def divert_tasks(extracted: dict) -> list[str]:
     return out
 
 
+def drop_source_nodes(extracted: dict, source: str) -> int:
+    """Drop nodes that are the ingest's own source ("claude-code session 9f441127",
+    "Source: ..."). The prompt names the source, and Oct 19-22 2026 the model filed
+    294 session stubs ("the session this was extracted from") under one category.
+    Provenance lives in the ingestion log, not the graph. Returns nodes dropped."""
+    src = " ".join((source or "").lower().split())
+    if not src:
+        return 0
+    def is_source(name: str) -> bool:
+        n = " ".join(name.lower().split())
+        return n == src or n == f"source: {src}"
+    dropped = {(n.get("name") or "").strip() for n in extracted.get("nodes", []) or []
+               if is_source(n.get("name") or "")}
+    if not dropped:
+        return 0
+    extracted["nodes"] = [n for n in extracted.get("nodes", []) or [] if (n.get("name") or "").strip() not in dropped]
+    extracted["edges"] = [e for e in extracted.get("edges", []) or []
+                          if (e.get("source") or "").strip() not in dropped
+                          and (e.get("target") or "").strip() not in dropped]
+    return len(dropped)
+
+
 def route_tasks(tasks: list[str], source: str = "", inbox_root=None) -> int:
     """Append diverted tasks to the vault's loop inbox. Best-effort: the graph
     write path must never fail because the vault is unavailable."""
@@ -977,6 +999,7 @@ def ingest(conn, raw: str, source: str = "", user: str = "", inbox_root=None,
     _stage(f"extracted {len(ex.get('nodes', []))} node(s), {len(ex.get('edges', []))} edge(s), "
            f"{len(ex.get('tasks', []) or [])} task(s)", t0)
     route_tasks(divert_tasks(ex), source=source, inbox_root=inbox_root)
+    drop_source_nodes(ex, source)
 
     if late():
         _stage(f"entity-link: skipped, past the {deadline_s:.0f}s ingest deadline "
